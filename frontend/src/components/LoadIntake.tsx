@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Truck, Search, PlusCircle, ArrowUpRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Truck, Search, PlusCircle, ArrowUpRight, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 import { Product } from '../App';
+import CameraScannerModal from './CameraScannerModal';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -32,6 +33,9 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
   const [costPrice, setCostPrice] = useState('');
   const [minThreshold, setMinThreshold] = useState('5');
 
+  // Camera & Scan states
+  const [cameraModalOpen, setCameraModalOpen] = useState(false);
+
   // Autocomplete UI state
   const [showDropdown, setShowDropdown] = useState(false);
   const [isExisting, setIsExisting] = useState(false);
@@ -39,6 +43,10 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
   // Status indicators
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Input refs for autofocus logic
+  const productNameInputRef = useRef<HTMLInputElement>(null);
+  const quantityInputRef = useRef<HTMLInputElement>(null);
 
   const fetchHistory = async () => {
     try {
@@ -55,6 +63,27 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
   useEffect(() => {
     fetchHistory();
   }, []);
+
+  // Play synthesized beep using browser's AudioContext
+  const playBeep = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // High pitch beep (A5)
+      gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime); // Keep volume at 5%
+
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.1); // Beep for 100ms
+    } catch (e) {
+      console.warn('Web Audio Context not supported or blocked by browser settings:', e);
+    }
+  };
 
   // Filter matches based on text input
   const matches = products.filter(p =>
@@ -104,6 +133,40 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
       setIsExisting(true);
     } else {
       setIsExisting(false);
+    }
+  };
+
+  const handleCameraScanSuccess = async (decodedText: string) => {
+    setCameraModalOpen(false);
+    playBeep();
+
+    setBarcode(decodedText);
+    
+    const exactMatch = products.find(p => p.sku.toLowerCase() === decodedText.trim().toLowerCase());
+    if (exactMatch) {
+      setProductName(exactMatch.name);
+      setUnitPrice(exactMatch.price);
+      setCostPrice(exactMatch.cost_price);
+      setMinThreshold(exactMatch.min_threshold.toString());
+      setSupplierName(exactMatch.supplier_name);
+      setIsExisting(true);
+      setErrorMsg(null);
+
+      // Autofocus quantity input box for existing items
+      setTimeout(() => {
+        quantityInputRef.current?.focus();
+      }, 100);
+    } else {
+      setProductName('');
+      setUnitPrice('');
+      setCostPrice('');
+      setMinThreshold('5');
+      setIsExisting(false);
+
+      // Autofocus product name input box for new registrations
+      setTimeout(() => {
+        productNameInputRef.current?.focus();
+      }, 100);
     }
   };
 
@@ -242,15 +305,25 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
             {/* Barcode/SKU Input */}
             <div>
               <label htmlFor="barcode" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Barcode / SKU *</label>
-              <input
-                id="barcode"
-                type="text"
-                placeholder="Scan or type barcode (e.g. SKU-HEAD-7492)"
-                value={barcode}
-                onChange={(e) => handleBarcodeChange(e.target.value)}
-                className="w-full bg-[#0b0f19] border border-slate-700 focus:border-blue-500 text-slate-100 px-4 py-2.5 rounded-xl outline-none transition-colors font-mono"
-                required
-              />
+              <div className="relative flex items-center">
+                <input
+                  id="barcode"
+                  type="text"
+                  placeholder="Scan or type barcode (e.g. SKU-HEAD-7492)"
+                  value={barcode}
+                  onChange={(e) => handleBarcodeChange(e.target.value)}
+                  className="w-full bg-[#0b0f19] border border-slate-700 focus:border-blue-500 text-slate-100 pl-4 pr-12 py-2.5 rounded-xl outline-none transition-colors font-mono"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setCameraModalOpen(true)}
+                  className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-blue-400 transition-colors"
+                  title="Scan barcode with camera"
+                >
+                  <Camera className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Product Name Autocomplete Input */}
@@ -258,6 +331,7 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
               <label htmlFor="prod_name" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Product Name *</label>
               <input
                 id="prod_name"
+                ref={productNameInputRef}
                 type="text"
                 autoComplete="off"
                 placeholder="e.g. Ergonomic Office Chair"
@@ -305,6 +379,7 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
               <label htmlFor="qty_added" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Quantity Added *</label>
               <input
                 id="qty_added"
+                ref={quantityInputRef}
                 type="number"
                 min="1"
                 placeholder="e.g. 50"
@@ -471,6 +546,14 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
           </div>
         </div>
       </div>
+
+      {/* Reusable Camera Scanner Modal */}
+      <CameraScannerModal
+        isOpen={cameraModalOpen}
+        onClose={() => setCameraModalOpen(false)}
+        onScanSuccess={handleCameraScanSuccess}
+        onScanError={(msg) => setErrorMsg(msg)}
+      />
     </div>
   );
 }

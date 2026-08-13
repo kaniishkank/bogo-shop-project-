@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode, Camera } from 'lucide-react';
 import { Product } from '../App';
-import { Html5Qrcode } from 'html5-qrcode';
+import CameraScannerModal from './CameraScannerModal';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -39,7 +39,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   const [scanSuccess, setScanSuccess] = useState(false);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
-  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
   // UI states
   const [loading, setLoading] = useState(false);
@@ -157,90 +156,29 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     }
   };
 
-  // Webcam scanning start
-  const startCamera = async () => {
+  const handleCameraScanSuccess = async (decodedText: string) => {
+    setCameraModalOpen(false);
     try {
-      await stopCamera();
+      playBeep();
+      setScanSuccess(true);
+      setTimeout(() => setScanSuccess(false), 300);
 
-      const html5QrCode = new Html5Qrcode('webcam-scanner');
-      html5QrCodeRef.current = html5QrCode;
+      setLoading(true);
+      const response = await fetch(`${API_URL}/api/products/scan/${decodedText.trim()}`);
+      const data = await response.json();
 
-      const qrCodeSuccessCallback = async (decodedText: string) => {
-        // Stop scanning immediately
-        await stopCamera();
-        setCameraModalOpen(false);
-
-        // Process search and add to cart
-        try {
-          playBeep();
-          setScanSuccess(true);
-          setTimeout(() => setScanSuccess(false), 300);
-
-          setLoading(true);
-          const response = await fetch(`${API_URL}/api/products/scan/${decodedText.trim()}`);
-          const data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(data.error || `Barcode '${decodedText}' not found in the catalog.`);
-          }
-
-          addToCart(data);
-        } catch (err: any) {
-          setErrorMsg(err.message || 'Scanned barcode not registered.');
-        } finally {
-          setLoading(false);
-          barcodeInputRef.current?.focus();
-        }
-      };
-
-      const config = { 
-        fps: 10, 
-        qrbox: (width: number, height: number) => {
-          const size = Math.min(width, height) * 0.70;
-          return { width: size, height: size };
-        }
-      };
-
-      await html5QrCode.start(
-        { facingMode: 'environment' },
-        config,
-        qrCodeSuccessCallback,
-        undefined
-      );
-    } catch (err) {
-      console.error('Failed to start camera scan:', err);
-      setErrorMsg('Could not access camera. Please check camera permissions.');
-      setCameraModalOpen(false);
-    }
-  };
-
-  const stopCamera = async () => {
-    if (html5QrCodeRef.current) {
-      try {
-        if (html5QrCodeRef.current.isScanning) {
-          await html5QrCodeRef.current.stop();
-        }
-      } catch (err) {
-        console.error('Failed to stop camera stream:', err);
+      if (!response.ok) {
+        throw new Error(data.error || `Barcode '${decodedText}' not found in the catalog.`);
       }
-      html5QrCodeRef.current = null;
+
+      addToCart(data);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Scanned barcode not registered.');
+    } finally {
+      setLoading(false);
+      barcodeInputRef.current?.focus();
     }
   };
-
-  // Sync camera start/stop lifecycle with modal state
-  useEffect(() => {
-    if (cameraModalOpen) {
-      const timer = setTimeout(() => {
-        startCamera();
-      }, 150);
-      return () => {
-        clearTimeout(timer);
-        stopCamera();
-      };
-    } else {
-      stopCamera();
-    }
-  }, [cameraModalOpen]);
 
   const updateQuantity = (productId: number, delta: number) => {
     setErrorMsg(null);
@@ -644,39 +582,13 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
         </div>
       )}
 
-      {/* Live Webcam Scanner Modal */}
-      {cameraModalOpen && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-lg p-6 relative animate-scaleUp flex flex-col items-center">
-            
-            <div className="flex items-center justify-between w-full mb-4 border-b border-slate-800 pb-3">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Camera className="w-5 h-5 text-violet-400" />
-                Live Camera Barcode Scanner
-              </h3>
-              <button
-                onClick={() => setCameraModalOpen(false)}
-                className="text-xs text-slate-400 hover:text-slate-200 font-bold bg-slate-800/80 px-3 py-1 rounded-xl transition-all"
-              >
-                Cancel / Close
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-400 text-center mb-4">
-              Center the barcode or QR code inside the camera scanning viewport guide below.
-            </p>
-
-            {/* Scanning Viewport */}
-            <div className="w-full aspect-video rounded-2xl bg-[#0b0f19] border border-slate-700/80 overflow-hidden relative shadow-inner">
-              <div id="webcam-scanner" className="w-full h-full"></div>
-            </div>
-
-            <div className="text-[10px] text-slate-500 font-mono mt-4 text-center">
-              Scanning active • Support: EAN-13, EAN-8, UPC-A, Code 128, QR Codes
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Reusable Camera Scanner Modal */}
+      <CameraScannerModal
+        isOpen={cameraModalOpen}
+        onClose={() => setCameraModalOpen(false)}
+        onScanSuccess={handleCameraScanSuccess}
+        onScanError={(msg) => setErrorMsg(msg)}
+      />
     </div>
   );
 }
