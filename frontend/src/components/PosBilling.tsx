@@ -86,6 +86,17 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     );
   }, [products, searchQuery]);
 
+  // Lightning-fast O(1) local cache map of products by SKU/barcode (UPPERCASE)
+  const productsByBarcode = useMemo(() => {
+    const map = new Map<string, Product>();
+    products.forEach(p => {
+      if (p.sku) {
+        map.set(p.sku.trim().toUpperCase(), p);
+      }
+    });
+    return map;
+  }, [products]);
+
   // Play synthesized beep using browser's AudioContext
   const playBeep = () => {
     try {
@@ -145,6 +156,25 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     const code = scanQuery.trim();
     if (!code) return;
 
+    // Zero-latency check from memory cache first
+    const cachedProduct = productsByBarcode.get(code.toUpperCase());
+    if (cachedProduct) {
+      if (cachedProduct.current_stock <= 0) {
+        setErrorMsg(`Product '${cachedProduct.name}' is out of stock.`);
+        setScanQuery('');
+        barcodeInputRef.current?.focus();
+        return;
+      }
+      playBeep();
+      setScanSuccess(true);
+      setTimeout(() => setScanSuccess(false), 300);
+      addToCart(cachedProduct);
+      setScanQuery('');
+      // Silent sync update in the background
+      refreshData();
+      return;
+    }
+
     try {
       setLoading(true);
       const response = await fetch(`${API_URL}/api/products/scan/${code}`);
@@ -177,13 +207,27 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
   const handleCameraScanSuccess = async (decodedText: string) => {
     setCameraModalOpen(false);
+    const code = decodedText.trim();
     try {
       playBeep();
       setScanSuccess(true);
       setTimeout(() => setScanSuccess(false), 300);
 
+      // Zero-latency check from memory cache first
+      const cachedProduct = productsByBarcode.get(code.toUpperCase());
+      if (cachedProduct) {
+        if (cachedProduct.current_stock <= 0) {
+          setErrorMsg(`Product '${cachedProduct.name}' is out of stock.`);
+          barcodeInputRef.current?.focus();
+          return;
+        }
+        addToCart(cachedProduct);
+        refreshData();
+        return;
+      }
+
       setLoading(true);
-      const response = await fetch(`${API_URL}/api/products/scan/${decodedText.trim()}`);
+      const response = await fetch(`${API_URL}/api/products/scan/${code}`);
       const data = await safeParseJson(response);
 
       if (!response.ok) {
@@ -377,66 +421,14 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
               </div>
             ) : (
               filteredProducts.map((p) => {
-                const isOutOfStock = p.current_stock <= 0;
-                const isLowStock = p.current_stock <= p.min_threshold;
                 const cartQty = cart.find(item => item.product.id === p.id)?.quantity_sold || 0;
-                const isCartCapped = cartQty >= p.current_stock;
-
                 return (
-                  <div 
-                    key={p.id} 
-                    onClick={() => !isOutOfStock && addToCart(p)}
-                    className={`glass-panel p-5 rounded-2xl flex flex-col justify-between cursor-pointer transition-all hover:scale-[1.01] hover:bg-slate-800/20 active:scale-[0.99] group ${
-                      isOutOfStock ? 'opacity-55 cursor-not-allowed border-slate-800/80' : 
-                      isLowStock ? 'border-orange-500/30' : 'border-slate-700/50'
-                    }`}
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Supplier: {p.supplier_name}</span>
-                          <h4 className="font-bold text-white group-hover:text-violet-400 transition-colors text-sm line-clamp-1">{p.name}</h4>
-                        </div>
-                        {/* Live Stock Badge */}
-                        <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full border shrink-0 ${
-                          isOutOfStock ? 'bg-red-500/10 border-red-500/30 text-red-400' :
-                          isLowStock ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' :
-                          'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        }`}>
-                          {isOutOfStock ? 'Out of stock' : `${p.current_stock} left`}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs font-mono">
-                        <span className="text-slate-400 font-bold">{p.sku}</span>
-                        {cartQty > 0 && (
-                          <span className="text-violet-400 font-extrabold bg-violet-500/10 px-2 py-0.5 rounded-md border border-violet-500/25">
-                            {cartQty} in cart
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800/60">
-                      <span className="text-lg font-extrabold text-white font-mono">
-                        ${parseFloat(p.price).toFixed(2)}
-                      </span>
-                      <button 
-                        disabled={isOutOfStock || isCartCapped}
-                        className={`p-2 rounded-xl transition-all ${
-                          isOutOfStock ? 'bg-slate-800 text-slate-600' :
-                          isCartCapped ? 'bg-slate-800 text-slate-500' :
-                          'bg-violet-600 hover:bg-violet-500 text-white shadow-md'
-                        }`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          addToCart(p);
-                        }}
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    cartQty={cartQty}
+                    onAdd={addToCart}
+                  />
                 );
               })
             )}
@@ -460,40 +452,12 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                 </div>
               ) : (
                 cart.map((item) => (
-                  <div key={item.product.id} className="p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl flex items-center justify-between">
-                    <div className="min-w-0 flex-1 pr-3">
-                      <h5 className="font-bold text-white text-xs truncate">{item.product.name}</h5>
-                      <span className="text-[10px] text-slate-400 block font-mono">{item.product.sku}</span>
-                      <span className="text-xs font-semibold text-slate-300 font-mono">
-                        ${parseFloat(item.product.price).toFixed(2)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2.5">
-                      <button 
-                        onClick={() => updateQuantity(item.product.id, -1)}
-                        className="p-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-md transition-colors"
-                      >
-                        <Minus className="w-3.5 h-3.5" />
-                      </button>
-                      <span className="text-sm font-bold text-white font-mono w-4 text-center">
-                        {item.quantity_sold}
-                      </span>
-                      <button 
-                        onClick={() => updateQuantity(item.product.id, 1)}
-                        className="p-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-md transition-colors"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                      
-                      <button 
-                        onClick={() => removeFromCart(item.product.id)}
-                        className="p-1.5 hover:bg-red-500/10 text-slate-500 hover:text-red-400 rounded-md transition-colors ml-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
+                  <CartItemRow
+                    key={item.product.id}
+                    item={item}
+                    onUpdateQty={updateQuantity}
+                    onRemove={removeFromCart}
+                  />
                 ))
               )}
             </div>
@@ -623,3 +587,116 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     </div>
   );
 }
+
+interface ProductCardProps {
+  product: Product;
+  cartQty: number;
+  onAdd: (product: Product) => void;
+}
+
+const ProductCard = React.memo(({ product, cartQty, onAdd }: ProductCardProps) => {
+  const isOutOfStock = product.current_stock <= 0;
+  const isLowStock = product.current_stock <= product.min_threshold;
+  const isCartCapped = cartQty >= product.current_stock;
+
+  return (
+    <div 
+      onClick={() => !isOutOfStock && onAdd(product)}
+      className={`glass-panel p-5 rounded-2xl flex flex-col justify-between cursor-pointer transition-all hover:scale-[1.01] hover:bg-slate-800/20 active:scale-[0.99] group ${
+        isOutOfStock ? 'opacity-55 cursor-not-allowed border-slate-800/80' : 
+        isLowStock ? 'border-orange-500/30' : 'border-slate-700/50'
+      }`}
+    >
+      <div className="space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Supplier: {product.supplier_name}</span>
+            <h4 className="font-bold text-white group-hover:text-violet-400 transition-colors text-sm line-clamp-1">{product.name}</h4>
+          </div>
+          {/* Live Stock Badge */}
+          <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full border shrink-0 ${
+            isOutOfStock ? 'bg-red-500/10 border-red-500/30 text-red-400' :
+            isLowStock ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' :
+            'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+          }`}>
+            {isOutOfStock ? 'Out of stock' : `${product.current_stock} left`}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between text-xs font-mono">
+          <span className="text-slate-400 font-bold">{product.sku}</span>
+          {cartQty > 0 && (
+            <span className="text-violet-400 font-extrabold bg-violet-500/10 px-2 py-0.5 rounded-md border border-violet-500/25">
+              {cartQty} in cart
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800/60">
+        <span className="text-lg font-extrabold text-white font-mono">
+          ${parseFloat(product.price).toFixed(2)}
+        </span>
+        <button 
+          disabled={isOutOfStock || isCartCapped}
+          className={`p-2 rounded-xl transition-all ${
+            isOutOfStock ? 'bg-slate-800 text-slate-600' :
+            isCartCapped ? 'bg-slate-800 text-slate-500' :
+            'bg-violet-600 hover:bg-violet-500 text-white shadow-md'
+          }`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd(product);
+          }}
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+});
+
+interface CartItemRowProps {
+  item: CartItem;
+  onUpdateQty: (productId: number, diff: number) => void;
+  onRemove: (productId: number) => void;
+}
+
+const CartItemRow = React.memo(({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
+  return (
+    <div className="p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl flex items-center justify-between">
+      <div className="min-w-0 flex-1 pr-3">
+        <h5 className="font-bold text-white text-xs truncate">{item.product.name}</h5>
+        <span className="text-[10px] text-slate-400 block font-mono">{item.product.sku}</span>
+        <span className="text-xs font-semibold text-slate-300 font-mono">
+          ${parseFloat(item.product.price).toFixed(2)}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2.5">
+        <button 
+          onClick={() => onUpdateQty(item.product.id, -1)}
+          className="p-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-md transition-colors"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <span className="text-sm font-bold text-white font-mono w-4 text-center">
+          {item.quantity_sold}
+        </span>
+        <button 
+          onClick={() => onUpdateQty(item.product.id, 1)}
+          className="p-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-md transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+        
+        <button 
+          onClick={() => onRemove(item.product.id)}
+          className="p-1.5 hover:bg-red-500/10 text-slate-500 hover:text-red-400 rounded-md transition-colors ml-1"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+});
