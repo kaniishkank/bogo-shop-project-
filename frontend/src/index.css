@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#0B0F19] text-slate-100 antialiased overflow-x-hidden;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+::-webkit-scrollbar-thumb {
+  background: #23304d;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6;
+}
+
+/* Glassmorphic Panel Design */
+.glass-panel {
+  background: rgba(21, 29, 48, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(35, 48, 77, 0.5);
+}
+
+/* Card Glow Micro-animations */
+.glow-card-violet {
+  box-shadow: 0 0 30px -5px rgba(139, 92, 246, 0.12);
+}
+
+.glow-card-orange {
+  box-shadow: 0 0 30px -5px rgba(249, 115, 22, 0.12);
+}
+
+.glow-card-red {
+  box-shadow: 0 0 30px -5px rgba(239, 68, 68, 0.12);
+}
+
+.glow-card-blue {
+  box-shadow: 0 0 30px -5px rgba(59, 130, 246, 0.12);
+}
+
+/* Strong blinking animation for dead stock warnings */
+@keyframes strong-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.15; transform: scale(0.97); }
+}
+
+.animate-strong-blink {
+  animation: strong-blink 1s infinite ease-in-out;
+}
+
