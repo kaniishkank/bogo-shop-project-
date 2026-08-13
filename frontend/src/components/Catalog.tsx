@@ -63,7 +63,7 @@ export default function Catalog({ products, refreshData, loading }: CatalogProps
               <tr className="border-b border-slate-700/60 text-slate-400">
                 <th className="py-3.5 px-5 font-semibold">Product Name / SKU</th>
                 <th className="py-3.5 px-4 font-semibold">Supplier Name</th>
-                <th className="py-3.5 px-4 font-semibold text-right">Unit Price</th>
+                <th className="py-3.5 px-4 font-semibold text-right">Price</th>
                 <th className="py-3.5 px-4 font-semibold text-center">Live Stock</th>
                 <th className="py-3.5 px-4 font-semibold text-center">Safety Threshold</th>
                 <th className="py-3.5 px-4 font-semibold text-center">Telemetry Status</th>
@@ -130,7 +130,7 @@ export default function Catalog({ products, refreshData, loading }: CatalogProps
                         {p.supplier_name}
                       </td>
                       <td className="py-4 px-4 text-right font-mono font-bold">
-                        ${parseFloat(p.unit_price).toFixed(2)}
+                        ${parseFloat(p.price).toFixed(2)}
                       </td>
                       <td className="py-4 px-4 text-center font-mono font-bold">
                         {p.current_stock}

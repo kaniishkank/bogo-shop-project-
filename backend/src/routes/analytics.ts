@@ -24,14 +24,12 @@ router.get('/financials', async (req: Request, res: Response) => {
     const revenueRes = await pool.query(revenueQuery);
     const totalRevenue = revenueRes.rows[0].total_revenue;
 
-    // 2. Fetch Total COGS (cost of goods sold)
+    // 2. Fetch Total COGS (cost of goods sold) directly from transactions
     const cogsQuery = `
-      SELECT COALESCE(SUM(ti.quantity_sold * p.purchase_price), 0)::FLOAT as cogs
-      FROM transaction_items ti
-      JOIN products p ON ti.product_id = p.id
-      JOIN sales_transactions t ON ti.transaction_id = t.id
-      WHERE t.status = 'COMPLETED'
-        ${startDateStr !== 'all' ? `AND t.created_at >= ${startDateStr}` : ''}
+      SELECT COALESCE(SUM(total_cogs), 0)::FLOAT as cogs
+      FROM sales_transactions
+      WHERE status = 'COMPLETED'
+        ${startDateStr !== 'all' ? `AND created_at >= ${startDateStr}` : ''}
     `;
     const cogsRes = await pool.query(cogsQuery);
     const cogs = cogsRes.rows[0].cogs;
@@ -52,14 +50,12 @@ router.get('/financials', async (req: Request, res: Response) => {
       seriesQuery = `
         WITH hourly_stats AS (
           SELECT 
-            date_trunc('hour', t.created_at) as hour,
-            SUM(t.total_amount)::FLOAT as revenue,
-            SUM(ti.quantity_sold * p.purchase_price)::FLOAT as cogs
-          FROM sales_transactions t
-          JOIN transaction_items ti ON t.id = ti.transaction_id
-          JOIN products p ON ti.product_id = p.id
-          WHERE t.status = 'COMPLETED'
-          GROUP BY date_trunc('hour', t.created_at)
+            date_trunc('hour', created_at) as hour,
+            SUM(total_amount)::FLOAT as revenue,
+            SUM(total_cogs)::FLOAT as cogs
+          FROM sales_transactions
+          WHERE status = 'COMPLETED'
+          GROUP BY date_trunc('hour', created_at)
         )
         SELECT 
           TO_CHAR(series.h, 'HH24:00') as label,
@@ -78,14 +74,12 @@ router.get('/financials', async (req: Request, res: Response) => {
       seriesQuery = `
         WITH weekly_stats AS (
           SELECT 
-            date_trunc('day', t.created_at) as day,
-            SUM(t.total_amount)::FLOAT as revenue,
-            SUM(ti.quantity_sold * p.purchase_price)::FLOAT as cogs
-          FROM sales_transactions t
-          JOIN transaction_items ti ON t.id = ti.transaction_id
-          JOIN products p ON ti.product_id = p.id
-          WHERE t.status = 'COMPLETED'
-          GROUP BY date_trunc('day', t.created_at)
+            date_trunc('day', created_at) as day,
+            SUM(total_amount)::FLOAT as revenue,
+            SUM(total_cogs)::FLOAT as cogs
+          FROM sales_transactions
+          WHERE status = 'COMPLETED'
+          GROUP BY date_trunc('day', created_at)
         )
         SELECT 
           TO_CHAR(series.d, 'Dy') as label,
@@ -104,14 +98,12 @@ router.get('/financials', async (req: Request, res: Response) => {
       seriesQuery = `
         WITH daily_stats AS (
           SELECT 
-            date_trunc('day', t.created_at) as day,
-            SUM(t.total_amount)::FLOAT as revenue,
-            SUM(ti.quantity_sold * p.purchase_price)::FLOAT as cogs
-          FROM sales_transactions t
-          JOIN transaction_items ti ON t.id = ti.transaction_id
-          JOIN products p ON ti.product_id = p.id
-          WHERE t.status = 'COMPLETED'
-          GROUP BY date_trunc('day', t.created_at)
+            date_trunc('day', created_at) as day,
+            SUM(total_amount)::FLOAT as revenue,
+            SUM(total_cogs)::FLOAT as cogs
+          FROM sales_transactions
+          WHERE status = 'COMPLETED'
+          GROUP BY date_trunc('day', created_at)
         )
         SELECT 
           TO_CHAR(series.d, 'DD Mon') as label,
@@ -130,14 +122,12 @@ router.get('/financials', async (req: Request, res: Response) => {
       seriesQuery = `
         WITH monthly_stats AS (
           SELECT 
-            date_trunc('month', t.created_at) as month,
-            SUM(t.total_amount)::FLOAT as revenue,
-            SUM(ti.quantity_sold * p.purchase_price)::FLOAT as cogs
-          FROM sales_transactions t
-          JOIN transaction_items ti ON t.id = ti.transaction_id
-          JOIN products p ON ti.product_id = p.id
-          WHERE t.status = 'COMPLETED'
-          GROUP BY date_trunc('month', t.created_at)
+            date_trunc('month', created_at) as month,
+            SUM(total_amount)::FLOAT as revenue,
+            SUM(total_cogs)::FLOAT as cogs
+          FROM sales_transactions
+          WHERE status = 'COMPLETED'
+          GROUP BY date_trunc('month', created_at)
         )
         SELECT 
           TO_CHAR(series.m, 'Mon YY') as label,
@@ -159,13 +149,13 @@ router.get('/financials', async (req: Request, res: Response) => {
     const productQuery = `
       SELECT 
         p.name,
-        COALESCE(SUM(ti.quantity_sold), 0)::INT as units_sold,
-        COALESCE(SUM(ti.quantity_sold * ti.unit_price), 0)::FLOAT as gross_revenue,
-        COALESCE(SUM(ti.quantity_sold * p.purchase_price), 0)::FLOAT as estimated_cost,
-        COALESCE(SUM(ti.quantity_sold * (ti.unit_price - p.purchase_price)), 0)::FLOAT as total_profit,
+        COALESCE(SUM(ti.quantity), 0)::INT as units_sold,
+        COALESCE(SUM(ti.quantity * ti.unit_price), 0)::FLOAT as gross_revenue,
+        COALESCE(SUM(ti.quantity * p.cost_price), 0)::FLOAT as estimated_cost,
+        COALESCE(SUM(ti.quantity * (ti.unit_price - p.cost_price)), 0)::FLOAT as total_profit,
         CASE 
-          WHEN SUM(ti.quantity_sold * ti.unit_price) > 0 
-          THEN (SUM(ti.quantity_sold * (ti.unit_price - p.purchase_price)) / SUM(ti.quantity_sold * ti.unit_price) * 100)::FLOAT 
+          WHEN SUM(ti.quantity * ti.unit_price) > 0 
+          THEN (SUM(ti.quantity * (ti.unit_price - p.cost_price)) / SUM(ti.quantity * ti.unit_price) * 100)::FLOAT 
           ELSE 0.0 
         END as margin_percent
       FROM products p

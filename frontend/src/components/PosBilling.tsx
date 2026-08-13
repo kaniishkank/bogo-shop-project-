@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt } from 'lucide-react';
+import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode } from 'lucide-react';
 import { Product } from '../App';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -17,6 +17,7 @@ interface CartItem {
 interface Invoice {
   id: number;
   total_amount: string;
+  payment_method: string;
   status: string;
   created_at: string;
   items: Array<{
@@ -28,15 +29,17 @@ interface Invoice {
 }
 
 export default function PosBilling({ products, refreshData }: PosBillingProps) {
+  const [scanQuery, setScanQuery] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'MOBILE'>('CASH');
   
   // UI states
   const [loading, setLoading] = useState(false);
   const [successInvoice, setSuccessInvoice] = useState<Invoice | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Filter products based on search query (Name and SKU only, Category removed)
+  // Filter products based on search query (Name and SKU only)
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.sku.toLowerCase().includes(searchQuery.toLowerCase())
@@ -67,6 +70,34 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     }
   };
 
+  const handleBarcodeScanSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessInvoice(null);
+
+    const code = scanQuery.trim();
+    if (!code) return;
+
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/api/products/scan/${code}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `Barcode '${code}' not found in the catalog.`);
+      }
+
+      // Add scanned product to cart
+      addToCart(data);
+      setScanQuery(''); // Clear the input field for next scan
+    } catch (err: any) {
+      console.error('Scan lookup failed:', err);
+      setErrorMsg(err.message || 'Scanned barcode not registered.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateQuantity = (productId: number, delta: number) => {
     setErrorMsg(null);
     const index = cart.findIndex(item => item.product.id === productId);
@@ -94,7 +125,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     setCart(cart.filter(item => item.product.id !== productId));
   };
 
-  const cartSubtotal = cart.reduce((sum, item) => sum + (item.quantity_sold * parseFloat(item.product.unit_price)), 0);
+  const cartSubtotal = cart.reduce((sum, item) => sum + (item.quantity_sold * parseFloat(item.product.price)), 0);
   const cartTax = cartSubtotal * 0.08; // 8% sales tax estimate
   const cartTotal = cartSubtotal + cartTax;
 
@@ -111,14 +142,17 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
     const itemsPayload = cart.map(item => ({
       product_id: item.product.id,
-      quantity_sold: item.quantity_sold
+      quantity: item.quantity_sold
     }));
 
     try {
-      const response = await fetch(`${API_URL}/api/pos/checkout`, {
+      const response = await fetch(`${API_URL}/api/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: itemsPayload })
+        body: JSON.stringify({ 
+          items: itemsPayload,
+          payment_method: paymentMethod
+        })
       });
 
       const data = await response.json();
@@ -131,6 +165,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
       setSuccessInvoice({
         id: data.transaction.id,
         total_amount: data.transaction.total_amount,
+        payment_method: data.transaction.payment_method,
         status: data.transaction.status,
         created_at: data.transaction.created_at,
         items: data.items
@@ -158,7 +193,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
           Cashier POS Billing Terminal
         </h1>
         <p className="text-slate-400 text-sm mt-1">
-          Add items to cart, verify real-time stock levels, and complete sales transactions.
+          Scan barcodes or search products to bill, verify real-time stock levels, and checkout.
         </p>
       </div>
 
@@ -174,18 +209,34 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
         {/* Products Search & Selection Grid (Col Span 2) */}
         <div className="lg:col-span-2 space-y-6">
           
-          {/* Search Box */}
-          <div className="relative">
-            <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
-              <Search className="w-5 h-5" />
-            </span>
-            <input
-              type="text"
-              placeholder="Search products by SKU or name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#151D30] border border-slate-700/80 focus:border-violet-500 text-slate-100 pl-12 pr-4 py-3.5 rounded-2xl outline-none transition-colors shadow-inner text-sm placeholder:text-slate-500"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Barcode Scanner Box */}
+            <form onSubmit={handleBarcodeScanSubmit} className="relative">
+              <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                <QrCode className="w-5 h-5 text-violet-400 animate-pulse" />
+              </span>
+              <input
+                type="text"
+                placeholder="Scan Barcode / SKU (Press Enter)..."
+                value={scanQuery}
+                onChange={(e) => setScanQuery(e.target.value)}
+                className="w-full bg-[#151D30] border border-violet-500/40 focus:border-violet-500 text-slate-100 pl-12 pr-4 py-3.5 rounded-2xl outline-none transition-colors shadow-inner text-sm font-mono placeholder:text-slate-500"
+              />
+            </form>
+
+            {/* Keyword Search Box */}
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                <Search className="w-5 h-5" />
+              </span>
+              <input
+                type="text"
+                placeholder="Search products by SKU or name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-[#151D30] border border-slate-700/80 focus:border-violet-500 text-slate-100 pl-12 pr-4 py-3.5 rounded-2xl outline-none transition-colors shadow-inner text-sm placeholder:text-slate-500"
+              />
+            </div>
           </div>
 
           {/* Products List Grid */}
@@ -213,7 +264,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                     <div className="space-y-2">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">Supplier</span>
+                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Supplier: {p.supplier_name}</span>
                           <h4 className="font-bold text-white group-hover:text-violet-400 transition-colors text-sm line-clamp-1">{p.name}</h4>
                         </div>
                         {/* Live Stock Badge */}
@@ -238,7 +289,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
                     <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800/60">
                       <span className="text-lg font-extrabold text-white font-mono">
-                        ${parseFloat(p.unit_price).toFixed(2)}
+                        ${parseFloat(p.price).toFixed(2)}
                       </span>
                       <button 
                         disabled={isOutOfStock || isCartCapped}
@@ -262,24 +313,18 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
           </div>
         </div>
 
-        {/* Invoice & Checkout Panel (Col Span 1) */}
-        <div className="glass-panel glow-card-violet rounded-2xl p-6 flex flex-col justify-between h-[630px]">
-          
-          <div className="flex flex-col h-[75%]">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-700/60 mb-4">
-              <h3 className="text-md font-bold text-white flex items-center gap-2">
-                <ShoppingCart className="w-5 h-5 text-violet-400" />
-                Active Sales Cart
-              </h3>
-              <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded-md">
-                {cart.reduce((sum, item) => sum + item.quantity_sold, 0)} units
-              </span>
-            </div>
+        {/* Cashier Invoice Cart Panel (Col Span 1) */}
+        <div className="glass-panel glow-card-violet rounded-2xl p-6 flex flex-col justify-between min-h-[500px]">
+          <div>
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-slate-800/60 pb-3">
+              <ShoppingCart className="w-5 h-5 text-violet-400" />
+              Customer Cart
+            </h3>
 
-            {/* Cart Items List */}
+            {/* Cart Items list */}
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               {cart.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-sm space-y-2">
+                <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-sm space-y-2">
                   <ShoppingCart className="w-12 h-12 text-slate-600 stroke-[1.5]" />
                   <span>Scan or select items to bill</span>
                 </div>
@@ -290,7 +335,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                       <h5 className="font-bold text-white text-xs truncate">{item.product.name}</h5>
                       <span className="text-[10px] text-slate-400 block font-mono">{item.product.sku}</span>
                       <span className="text-xs font-semibold text-slate-300 font-mono">
-                        ${parseFloat(item.product.unit_price).toFixed(2)}
+                        ${parseFloat(item.product.price).toFixed(2)}
                       </span>
                     </div>
 
@@ -324,8 +369,32 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
             </div>
           </div>
 
-          {/* Pricing & Checkout */}
+          {/* Payment Method & Checkout */}
           <div className="mt-4 pt-4 border-t border-slate-700/60 space-y-4">
+            
+            {/* Payment Method Selector */}
+            {cart.length > 0 && (
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Payment Method</label>
+                <div className="grid grid-cols-3 gap-2 bg-[#0B0F19] p-1 rounded-xl border border-slate-800">
+                  {(['CASH', 'CARD', 'MOBILE'] as const).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setPaymentMethod(method)}
+                      className={`py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        paymentMethod === method
+                          ? 'bg-violet-600 text-white shadow'
+                          : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5 text-xs text-slate-400 font-mono">
               <div className="flex justify-between">
                 <span>Subtotal</span>
@@ -374,6 +443,9 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                 <h3 className="text-xl font-bold text-white">Invoice Receipt Issued</h3>
                 <p className="text-xs text-emerald-400 font-semibold font-mono mt-0.5">Transaction #TX-100{successInvoice.id} COMPLETED</p>
                 <p className="text-[10px] text-slate-500 mt-1">{new Date(successInvoice.created_at).toLocaleString()}</p>
+                <span className="text-[10px] font-bold px-2 py-0.5 bg-violet-500/10 border border-violet-500/25 text-violet-400 rounded-md inline-block mt-2">
+                  Paid via {successInvoice.payment_method}
+                </span>
               </div>
             </div>
 

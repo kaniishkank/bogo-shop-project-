@@ -14,7 +14,8 @@ export interface Product {
   id: number;
   name: string;
   sku: string;
-  unit_price: string;
+  price: string;
+  cost_price: string;
   current_stock: number;
   min_threshold: number;
   supplier_name: string;

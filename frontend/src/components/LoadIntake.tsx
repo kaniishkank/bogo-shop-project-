@@ -24,11 +24,13 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
   const [loading, setLoading] = useState(false);
 
   // Form Fields
+  const [barcode, setBarcode] = useState('');
   const [productName, setProductName] = useState('');
   const [quantity, setQuantity] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [unitPrice, setUnitPrice] = useState('');
-  const [minThreshold, setMinThreshold] = useState('10');
+  const [costPrice, setCostPrice] = useState('');
+  const [minThreshold, setMinThreshold] = useState('5');
 
   // Autocomplete UI state
   const [showDropdown, setShowDropdown] = useState(false);
@@ -59,9 +61,27 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
     p.name.toLowerCase().includes(productName.toLowerCase())
   );
 
+  const handleBarcodeChange = (val: string) => {
+    setBarcode(val);
+    const exactMatch = products.find(p => p.sku.toLowerCase() === val.trim().toLowerCase());
+    if (exactMatch) {
+      setProductName(exactMatch.name);
+      setUnitPrice(exactMatch.price);
+      setCostPrice(exactMatch.cost_price);
+      setMinThreshold(exactMatch.min_threshold.toString());
+      setSupplierName(exactMatch.supplier_name);
+      setIsExisting(true);
+      setErrorMsg(null);
+    } else {
+      setIsExisting(false);
+    }
+  };
+
   const handleSelectProduct = (selected: Product) => {
+    setBarcode(selected.sku);
     setProductName(selected.name);
-    setUnitPrice(selected.unit_price);
+    setUnitPrice(selected.price);
+    setCostPrice(selected.cost_price);
     setMinThreshold(selected.min_threshold.toString());
     setSupplierName(selected.supplier_name);
     setIsExisting(true);
@@ -76,7 +96,9 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
     // Check if typed name exactly matches an existing product (case-insensitive)
     const exactMatch = products.find(p => p.name.toLowerCase() === val.trim().toLowerCase());
     if (exactMatch) {
-      setUnitPrice(exactMatch.unit_price);
+      setBarcode(exactMatch.sku);
+      setUnitPrice(exactMatch.price);
+      setCostPrice(exactMatch.cost_price);
       setMinThreshold(exactMatch.min_threshold.toString());
       setSupplierName(exactMatch.supplier_name);
       setIsExisting(true);
@@ -86,11 +108,13 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
   };
 
   const handleResetForm = () => {
+    setBarcode('');
     setProductName('');
     setQuantity('');
     setSupplierName('');
     setUnitPrice('');
-    setMinThreshold('10');
+    setCostPrice('');
+    setMinThreshold('5');
     setIsExisting(false);
     setShowDropdown(false);
     setSuccessMsg(null);
@@ -102,8 +126,8 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
     setSuccessMsg(null);
     setErrorMsg(null);
 
-    if (!productName.trim() || !quantity || !supplierName.trim()) {
-      setErrorMsg('Please fill in Product Name, Quantity, and Supplier Name.');
+    if (!barcode.trim() || !productName.trim() || !quantity || !supplierName.trim()) {
+      setErrorMsg('Please fill in Barcode, Product Name, Quantity, and Supplier Name.');
       return;
     }
 
@@ -114,11 +138,16 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
     }
 
     const priceFloat = parseFloat(unitPrice);
+    const costPriceFloat = parseFloat(costPrice);
     const thresholdInt = parseInt(minThreshold);
 
     if (!isExisting) {
       if (isNaN(priceFloat) || priceFloat < 0) {
         setErrorMsg('New products require a valid unit price.');
+        return;
+      }
+      if (isNaN(costPriceFloat) || costPriceFloat < 0) {
+        setErrorMsg('New products require a valid unit cost.');
         return;
       }
       if (isNaN(thresholdInt) || thresholdInt < 0) {
@@ -130,14 +159,16 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/inventory/load`, {
+      const response = await fetch(`${API_URL}/api/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          barcode: barcode.trim(),
           name: productName.trim(),
-          quantity_added: qty,
+          current_stock: qty,
           supplier_name: supplierName.trim(),
-          unit_price: isExisting ? undefined : priceFloat,
+          price: isExisting ? undefined : priceFloat,
+          cost_price: isExisting ? undefined : costPriceFloat,
           min_threshold: isExisting ? undefined : thresholdInt
         })
       });
@@ -145,20 +176,22 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to submit load intake');
+        throw new Error(data.error || 'Failed to submit product intake');
       }
 
       setSuccessMsg(
         isExisting 
-          ? `Stock incremented! Added ${qty} units to existing SKU "${data.product.name}"`
-          : `New SKU cataloged successfully! Registered "${data.product.name}" with initial stock of ${qty} units.`
+          ? `Stock incremented! Added ${qty} units to existing SKU "${data.name}"`
+          : `New SKU cataloged successfully! Registered "${data.name}" with initial stock of ${qty} units.`
       );
 
       // Clean up fields (except supplier for convenience)
+      setBarcode('');
       setProductName('');
       setQuantity('');
       setUnitPrice('');
-      setMinThreshold('10');
+      setCostPrice('');
+      setMinThreshold('5');
       setIsExisting(false);
       
       // Update global React products state
@@ -206,6 +239,20 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             
+            {/* Barcode/SKU Input */}
+            <div>
+              <label htmlFor="barcode" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Barcode / SKU *</label>
+              <input
+                id="barcode"
+                type="text"
+                placeholder="Scan or type barcode (e.g. SKU-HEAD-7492)"
+                value={barcode}
+                onChange={(e) => handleBarcodeChange(e.target.value)}
+                className="w-full bg-[#0b0f19] border border-slate-700 focus:border-blue-500 text-slate-100 px-4 py-2.5 rounded-xl outline-none transition-colors font-mono"
+                required
+              />
+            </div>
+
             {/* Product Name Autocomplete Input */}
             <div className="relative">
               <label htmlFor="prod_name" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Product Name *</label>
@@ -222,7 +269,7 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
               />
 
               {/* Status Badge */}
-              {productName.trim() !== '' && (
+              {barcode.trim() !== '' && (
                 <div className="absolute right-3 top-9">
                   {isExisting ? (
                     <span className="text-[10px] font-bold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-md">
@@ -230,7 +277,7 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
                     </span>
                   ) : (
                     <span className="text-[10px] font-bold bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded-md">
-                      New SKU auto-sync
+                      New SKU
                     </span>
                   )}
                 </div>
@@ -290,7 +337,7 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="price" className="block text-xs text-slate-500 mb-1.5">Unit Price ($)</label>
+                  <label htmlFor="price" className="block text-xs text-slate-500 mb-1.5">Unit Price ($) *</label>
                   <input
                     id="price"
                     type="number"
@@ -298,7 +345,13 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
                     min="0"
                     placeholder="0.00"
                     value={unitPrice}
-                    onChange={(e) => setUnitPrice(e.target.value)}
+                    onChange={(e) => {
+                      setUnitPrice(e.target.value);
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val) && !costPrice) {
+                        setCostPrice((val * 0.60).toFixed(2));
+                      }
+                    }}
                     disabled={isExisting}
                     className="w-full bg-[#0b0f19] border border-slate-700 disabled:opacity-55 disabled:text-slate-400 text-slate-100 px-4 py-2.5 rounded-xl outline-none font-mono text-sm focus:border-blue-500"
                     required
@@ -306,18 +359,34 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
                 </div>
 
                 <div>
-                  <label htmlFor="threshold" className="block text-xs text-slate-500 mb-1.5">Min Warning threshold</label>
+                  <label htmlFor="costPrice" className="block text-xs text-slate-500 mb-1.5">Unit Cost (COGS) ($) *</label>
                   <input
-                    id="threshold"
+                    id="costPrice"
                     type="number"
+                    step="0.01"
                     min="0"
-                    value={minThreshold}
-                    onChange={(e) => setMinThreshold(e.target.value)}
+                    placeholder="0.00"
+                    value={costPrice}
+                    onChange={(e) => setCostPrice(e.target.value)}
                     disabled={isExisting}
                     className="w-full bg-[#0b0f19] border border-slate-700 disabled:opacity-55 disabled:text-slate-400 text-slate-100 px-4 py-2.5 rounded-xl outline-none font-mono text-sm focus:border-blue-500"
                     required
                   />
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="threshold" className="block text-xs text-slate-500 mb-1.5">Min Warning threshold *</label>
+                <input
+                  id="threshold"
+                  type="number"
+                  min="0"
+                  value={minThreshold}
+                  onChange={(e) => setMinThreshold(e.target.value)}
+                  disabled={isExisting}
+                  className="w-full bg-[#0b0f19] border border-slate-700 disabled:opacity-55 disabled:text-slate-400 text-slate-100 px-4 py-2.5 rounded-xl outline-none font-mono text-sm focus:border-blue-500"
+                  required
+                />
               </div>
             </div>
 

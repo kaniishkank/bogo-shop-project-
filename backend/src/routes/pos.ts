@@ -5,25 +5,28 @@ const router = Router();
 
 interface CartItem {
   product_id: number;
-  quantity_sold: number;
+  quantity?: number;
+  quantity_sold?: number; // fallback
 }
 
-// POST /api/pos/checkout - Checkout shopping cart items atomically
+// POST /checkout - Checkout shopping cart items atomically
+// (Mounted as both POST /api/pos/checkout and POST /api/checkout)
 router.post('/checkout', async (req: Request, res: Response) => {
   const { items } = req.body as { items: CartItem[] };
+  const paymentMethod = (req.body.payment_method || 'CASH').toString().trim().toUpperCase();
 
   if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'Cart is empty. Must include an array of items with product_id and quantity_sold.' });
+    return res.status(400).json({ error: 'Cart is empty. Must include an array of items with product_id and quantity.' });
   }
 
   // Basic validation of inputs
   for (const item of items) {
-    if (!item.product_id || item.quantity_sold === undefined) {
-      return res.status(400).json({ error: 'Each cart item must have a product_id and quantity_sold.' });
+    if (!item.product_id || (item.quantity === undefined && item.quantity_sold === undefined)) {
+      return res.status(400).json({ error: 'Each cart item must have a product_id and quantity.' });
     }
-    const qty = parseInt(item.quantity_sold.toString());
+    const qty = parseInt((item.quantity !== undefined ? item.quantity : item.quantity_sold!).toString());
     if (isNaN(qty) || qty <= 0) {
-      return res.status(400).json({ error: 'quantity_sold must be a positive integer.' });
+      return res.status(400).json({ error: 'quantity must be a positive integer.' });
     }
   }
 
@@ -36,18 +39,22 @@ router.post('/checkout', async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     let totalAmount = 0;
+    let totalCogs = 0;
     const validatedItems: Array<{
       product_id: number;
       name: string;
-      quantity_sold: number;
+      quantity: number;
       unit_price: number;
+      cost_price: number;
     }> = [];
 
-    // 1. Validate stock and gather pricing for all items
+    // 1. Validate stock and gather pricing/cogs for all items
     for (const item of sortedItems) {
+      const qty = parseInt((item.quantity !== undefined ? item.quantity : item.quantity_sold!).toString());
+      
       // Lock the product row for update
       const productRes = await client.query(
-        'SELECT id, name, current_stock, unit_price::FLOAT as unit_price FROM products WHERE id = $1 FOR UPDATE',
+        'SELECT id, name, current_stock, price::FLOAT as price, cost_price::FLOAT as cost_price FROM products WHERE id = $1 FOR UPDATE',
         [item.product_id]
       );
 
@@ -58,31 +65,34 @@ router.post('/checkout', async (req: Request, res: Response) => {
 
       const product = productRes.rows[0];
       
-      if (product.current_stock < item.quantity_sold) {
+      if (product.current_stock < qty) {
         await client.query('ROLLBACK');
         return res.status(400).json({ 
-          error: `Insufficient stock for product '${product.name}'. Requested: ${item.quantity_sold}, Available: ${product.current_stock}.` 
+          error: `Insufficient stock for product '${product.name}'. Requested: ${qty}, Available: ${product.current_stock}.` 
         });
       }
 
-      const itemTotal = item.quantity_sold * product.unit_price;
+      const itemTotal = qty * product.price;
+      const itemCogs = qty * product.cost_price;
       totalAmount += itemTotal;
+      totalCogs += itemCogs;
 
       validatedItems.push({
         product_id: item.product_id,
         name: product.name,
-        quantity_sold: item.quantity_sold,
-        unit_price: product.unit_price
+        quantity: qty,
+        unit_price: product.price,
+        cost_price: product.cost_price
       });
     }
 
-    // 2. Insert sales transaction record
+    // 2. Insert sales transaction record (storing total_amount, total_cogs, and payment_method)
     const transactionQuery = `
-      INSERT INTO sales_transactions (total_amount, status)
-      VALUES ($1, 'COMPLETED')
-      RETURNING id, total_amount, status, created_at
+      INSERT INTO sales_transactions (total_amount, total_cogs, payment_method, status)
+      VALUES ($1, $2, $3, 'COMPLETED')
+      RETURNING id, total_amount, total_cogs, payment_method, status, created_at
     `;
-    const transactionRes = await client.query(transactionQuery, [totalAmount]);
+    const transactionRes = await client.query(transactionQuery, [totalAmount, totalCogs, paymentMethod]);
     const transactionId = transactionRes.rows[0].id;
 
     // 3. Deduct stock and insert transaction items
@@ -96,14 +106,14 @@ router.post('/checkout', async (req: Request, res: Response) => {
           updated_at = NOW()
         WHERE id = $2
       `;
-      await client.query(updateProductQuery, [item.quantity_sold, item.product_id]);
+      await client.query(updateProductQuery, [item.quantity, item.product_id]);
 
       // Insert transaction item
       const itemQuery = `
-        INSERT INTO transaction_items (transaction_id, product_id, quantity_sold, unit_price)
+        INSERT INTO transaction_items (transaction_id, product_id, quantity, unit_price)
         VALUES ($1, $2, $3, $4)
       `;
-      await client.query(itemQuery, [transactionId, item.product_id, item.quantity_sold, item.unit_price]);
+      await client.query(itemQuery, [transactionId, item.product_id, item.quantity, item.unit_price]);
     }
 
     // Commit the entire atomic checkout transaction
@@ -112,7 +122,12 @@ router.post('/checkout', async (req: Request, res: Response) => {
     res.status(201).json({
       message: 'Checkout completed successfully',
       transaction: transactionRes.rows[0],
-      items: validatedItems
+      items: validatedItems.map(vi => ({
+        product_id: vi.product_id,
+        name: vi.name,
+        quantity_sold: vi.quantity, // mapped for backwards compatibility in frontend Success receipt
+        unit_price: vi.unit_price
+      }))
     });
   } catch (err: any) {
     await client.query('ROLLBACK');
@@ -134,6 +149,8 @@ router.get('/transactions', async (req: Request, res: Response) => {
       SELECT 
         t.id, 
         t.total_amount, 
+        t.total_cogs,
+        t.payment_method,
         t.status, 
         t.created_at,
         COUNT(ti.id)::INT as total_items_count

@@ -21,12 +21,12 @@ const migrationSql = `
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
     sku VARCHAR(100) UNIQUE NOT NULL,
-    unit_price DECIMAL(10, 2) NOT NULL,
-    purchase_price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    price DECIMAL(10, 2) NOT NULL,
+    cost_price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
     current_stock INT NOT NULL DEFAULT 0 CHECK (current_stock >= 0),
-    min_threshold INT NOT NULL DEFAULT 10,
+    min_threshold INT NOT NULL DEFAULT 5,
     supplier_name VARCHAR(255) NOT NULL,
-    last_sold_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Ensure this is always populated (NOT NULL)
+    last_sold_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   );
@@ -44,6 +44,8 @@ const migrationSql = `
   CREATE TABLE sales_transactions (
     id SERIAL PRIMARY KEY,
     total_amount DECIMAL(10, 2) NOT NULL,
+    total_cogs DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    payment_method VARCHAR(100) NOT NULL DEFAULT 'CASH',
     status VARCHAR(50) NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('COMPLETED', 'CANCELLED')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   );
@@ -53,14 +55,14 @@ const migrationSql = `
     id SERIAL PRIMARY KEY,
     transaction_id INT NOT NULL REFERENCES sales_transactions(id) ON DELETE CASCADE,
     product_id INT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-    quantity_sold INT NOT NULL CHECK (quantity_sold > 0),
+    quantity INT NOT NULL CHECK (quantity > 0),
     unit_price DECIMAL(10, 2) NOT NULL
   );
 `;
 
 const seedSql = `
-  -- Insert mock products matching refactored schema with strictly populated last_sold_at and purchase_price
-  INSERT INTO products (name, sku, unit_price, purchase_price, current_stock, min_threshold, supplier_name, last_sold_at, created_at)
+  -- Insert mock products matching refactored schema
+  INSERT INTO products (name, sku, price, cost_price, current_stock, min_threshold, supplier_name, last_sold_at, created_at)
   VALUES 
     -- Healthy stock item
     ('Premium Wireless Headphones', 'SKU-HEAD-7492', 89.99, 50.00, 45, 15, 'Apex Audio Group', NOW() - INTERVAL '2 days', NOW() - INTERVAL '10 days'),
@@ -77,18 +79,18 @@ const seedSql = `
   ON CONFLICT (sku) DO NOTHING;
 
   -- Seed sales transactions and transaction items for historical chart display
-  INSERT INTO sales_transactions (id, total_amount, status, created_at)
+  INSERT INTO sales_transactions (id, total_amount, total_cogs, payment_method, status, created_at)
   VALUES
-    (101, 104.98, 'COMPLETED', NOW() - INTERVAL '15 days'),
-    (102, 249.99, 'COMPLETED', NOW() - INTERVAL '12 days'),
-    (103, 309.48, 'COMPLETED', NOW() - INTERVAL '8 days'),
-    (104, 89.99, 'COMPLETED', NOW() - INTERVAL '5 days'),
-    (105, 409.48, 'COMPLETED', NOW() - INTERVAL '3 days'),
-    (106, 144.49, 'COMPLETED', NOW() - INTERVAL '1 day'),
-    (107, 339.98, 'COMPLETED', NOW() - INTERVAL '5 hours')
+    (101, 104.98, 56.00, 'CASH', 'COMPLETED', NOW() - INTERVAL '15 days'),
+    (102, 249.99, 150.00, 'CARD', 'COMPLETED', NOW() - INTERVAL '12 days'),
+    (103, 309.48, 175.00, 'MOBILE', 'COMPLETED', NOW() - INTERVAL '8 days'),
+    (104, 89.99, 50.00, 'CASH', 'COMPLETED', NOW() - INTERVAL '5 days'),
+    (105, 409.48, 237.00, 'CARD', 'COMPLETED', NOW() - INTERVAL '3 days'),
+    (106, 144.49, 81.00, 'CASH', 'COMPLETED', NOW() - INTERVAL '1 day'),
+    (107, 339.98, 200.00, 'CARD', 'COMPLETED', NOW() - INTERVAL '5 hours')
   ON CONFLICT (id) DO NOTHING;
 
-  INSERT INTO transaction_items (transaction_id, product_id, quantity_sold, unit_price)
+  INSERT INTO transaction_items (transaction_id, product_id, quantity, unit_price)
   VALUES
     -- Transaction 101: 1 Headphone, 1 Cable
     (101, (SELECT id FROM products WHERE sku = 'SKU-HEAD-7492'), 1, 89.99),

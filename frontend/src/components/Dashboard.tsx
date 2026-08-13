@@ -186,7 +186,7 @@ export default function Dashboard({ products, alerts, transactions, stats, refre
                   <div className="text-right shrink-0">
                     <span className="text-xs text-slate-500 block">Asset Value</span>
                     <span className="font-mono text-sm font-semibold text-slate-300">
-                      ${(item.current_stock * parseFloat(item.unit_price)).toFixed(2)}
+                      ${(item.current_stock * parseFloat(item.price)).toFixed(2)}
                     </span>
                   </div>
                 </div>

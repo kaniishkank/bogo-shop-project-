@@ -77,7 +77,7 @@ router.post('/load', async (req: Request, res: Response) => {
       const generatedSku = generateSKU(name);
       
       const insertQuery = `
-        INSERT INTO products (name, sku, unit_price, purchase_price, current_stock, min_threshold, supplier_name)
+        INSERT INTO products (name, sku, price, cost_price, current_stock, min_threshold, supplier_name)
         VALUES ($1, $2, $3, $3 * 0.60, $4, $5, $6)
         RETURNING *
       `;
@@ -155,7 +155,7 @@ router.get('/alerts', async (req: Request, res: Response) => {
     // 2. Fetch dead stock items (unsold for 90 days, sitting stock > 0)
     const deadStockQuery = `
       SELECT 
-        id, name, sku, unit_price, current_stock, min_threshold, supplier_name, last_sold_at, created_at,
+        id, name, sku, price, current_stock, min_threshold, supplier_name, last_sold_at, created_at,
         COALESCE(
           EXTRACT(DAY FROM NOW() - last_sold_at),
           EXTRACT(DAY FROM NOW() - created_at)
