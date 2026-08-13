@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import { Camera } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
 
 interface CameraScannerModalProps {
   isOpen: boolean;
@@ -15,12 +14,14 @@ export default function CameraScannerModal({
   onScanSuccess,
   onScanError
 }: CameraScannerModalProps) {
-  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+  const html5QrCodeRef = useRef<any>(null);
 
   const startCamera = async () => {
     try {
       await stopCamera();
 
+      // Lazy-load html5-qrcode module to optimize bundle performance
+      const { Html5Qrcode } = await import('html5-qrcode');
       const html5QrCode = new Html5Qrcode('webcam-scanner');
       html5QrCodeRef.current = html5QrCode;
 

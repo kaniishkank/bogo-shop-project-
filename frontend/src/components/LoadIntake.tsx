@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Truck, Search, PlusCircle, ArrowUpRight, CheckCircle2, AlertCircle, Camera, Pencil } from 'lucide-react';
 import { Product } from '../App';
 import CameraScannerModal from './CameraScannerModal';
@@ -195,9 +195,11 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
   };
 
   // Filter matches based on text input
-  const matches = products.filter(p =>
-    p.name.toLowerCase().includes(productName.toLowerCase())
-  );
+  const matches = useMemo(() => {
+    const q = productName.toLowerCase().trim();
+    if (!q) return [];
+    return products.filter(p => p.name.toLowerCase().includes(q));
+  }, [products, productName]);
 
   const handleBarcodeChange = (val: string) => {
     setBarcode(val);

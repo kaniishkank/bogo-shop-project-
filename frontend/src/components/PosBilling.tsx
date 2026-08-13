@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode, Camera } from 'lucide-react';
 import { Product } from '../App';
 import CameraScannerModal from './CameraScannerModal';
@@ -77,10 +77,14 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   }, []);
 
   // Filter products based on search query (Name and SKU only)
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.sku.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProducts = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return products;
+    return products.filter(p => 
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q)
+    );
+  }, [products, searchQuery]);
 
   // Play synthesized beep using browser's AudioContext
   const playBeep = () => {
