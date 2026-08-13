@@ -48,12 +48,28 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
   const productNameInputRef = useRef<HTMLInputElement>(null);
   const quantityInputRef = useRef<HTMLInputElement>(null);
 
+  // Helper for safe JSON parsing to prevent "unexpected character" crashes
+  const safeParseJson = async (res: Response) => {
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      try {
+        return await res.json();
+      } catch (err) {
+        console.error('JSON parsing failed:', err);
+      }
+    }
+    const text = await res.text();
+    return { error: text || `HTTP Error ${res.status}: ${res.statusText}` };
+  };
+
   const fetchHistory = async () => {
     try {
       const response = await fetch(`${API_URL}/api/inventory/loads`);
       if (response.ok) {
-        const data = await response.json();
-        setLoads(data);
+        const data = await safeParseJson(response);
+        if (Array.isArray(data)) {
+          setLoads(data);
+        }
       }
     } catch (err) {
       console.error('Error fetching loads history:', err);
@@ -236,7 +252,7 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
         })
       });
 
-      const data = await response.json();
+      const data = await safeParseJson(response);
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to submit product intake');

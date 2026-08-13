@@ -45,6 +45,20 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   const [successInvoice, setSuccessInvoice] = useState<Invoice | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Helper for safe JSON parsing to prevent "unexpected character" crashes
+  const safeParseJson = async (res: Response) => {
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      try {
+        return await res.json();
+      } catch (err) {
+        console.error('JSON parsing failed:', err);
+      }
+    }
+    const text = await res.text();
+    return { error: text || `HTTP Error ${res.status}: ${res.statusText}` };
+  };
+
   // Focus scan box on mount and bind click refocus listener
   useEffect(() => {
     barcodeInputRef.current?.focus();
@@ -129,7 +143,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     try {
       setLoading(true);
       const response = await fetch(`${API_URL}/api/products/scan/${code}`);
-      const data = await response.json();
+      const data = await safeParseJson(response);
 
       if (!response.ok) {
         throw new Error(data.error || `Barcode '${code}' not found in the catalog.`);
@@ -165,7 +179,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
       setLoading(true);
       const response = await fetch(`${API_URL}/api/products/scan/${decodedText.trim()}`);
-      const data = await response.json();
+      const data = await safeParseJson(response);
 
       if (!response.ok) {
         throw new Error(data.error || `Barcode '${decodedText}' not found in the catalog.`);
@@ -239,7 +253,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
         })
       });
 
-      const data = await response.json();
+      const data = await safeParseJson(response);
 
       if (!response.ok) {
         throw new Error(data.error || 'Checkout transaction failed.');
