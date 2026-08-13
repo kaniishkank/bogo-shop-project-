@@ -44,6 +44,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   const [loading, setLoading] = useState(false);
   const [successInvoice, setSuccessInvoice] = useState<Invoice | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Helper for safe JSON parsing to prevent "unexpected character" crashes
   const safeParseJson = async (res: Response) => {
@@ -229,6 +230,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
   const handleCheckout = async () => {
     setErrorMsg(null);
+    setSuccessMsg(null);
     setSuccessInvoice(null);
 
     if (cart.length === 0) {
@@ -274,6 +276,10 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
       // Trigger global state refresh immediately
       await refreshData();
+
+      // Show success toast
+      setSuccessMsg("Checkout Completed Successfully!");
+      setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
       console.error('Checkout error:', err);
       setErrorMsg(err.message || 'Server error occurred during checkout.');
@@ -300,6 +306,13 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
         <div className="p-4 bg-red-900/30 border border-red-500/50 rounded-xl text-red-200 text-sm flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
           <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div className="p-4 bg-emerald-900/30 border border-emerald-500/50 rounded-xl text-emerald-200 text-sm flex items-center gap-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span>{successMsg}</span>
         </div>
       )}
 

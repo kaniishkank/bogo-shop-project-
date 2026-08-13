@@ -12,8 +12,32 @@ interface CartItem {
 // POST /checkout - Checkout shopping cart items atomically
 // (Mounted as both POST /api/pos/checkout and POST /api/checkout)
 router.post('/checkout', async (req: Request, res: Response) => {
-  const { items } = req.body as { items: CartItem[] };
-  const paymentMethod = (req.body.payment_method || 'CASH').toString().trim().toUpperCase();
+  let items = req.body.items;
+  const cartItems = req.body.cartItems;
+  const paymentMethod = (req.body.paymentMethod || req.body.payment_method || 'CASH').toString().trim().toUpperCase();
+
+  // If frontend sent cartItems format, translate it to internal items format
+  if (cartItems && Array.isArray(cartItems)) {
+    items = [];
+    for (const item of cartItems) {
+      let productId = item.id;
+      // If product ID is not present, resolve it via barcode lookup
+      if (!productId && item.barcode) {
+        try {
+          const prodRes = await pool.query('SELECT id FROM products WHERE UPPER(sku) = UPPER($1)', [item.barcode.toString().trim()]);
+          if (prodRes.rows.length > 0) {
+            productId = prodRes.rows[0].id;
+          }
+        } catch (err) {
+          console.error('Error matching barcode in checkout:', err);
+        }
+      }
+      items.push({
+        product_id: productId,
+        quantity: item.quantity !== undefined ? item.quantity : item.quantity_sold
+      });
+    }
+  }
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Cart is empty. Must include an array of items with product_id and quantity.' });
@@ -119,8 +143,9 @@ router.post('/checkout', async (req: Request, res: Response) => {
     // Commit the entire atomic checkout transaction
     await client.query('COMMIT');
 
-    res.status(201).json({
-      message: 'Checkout completed successfully',
+    res.status(200).json({
+      success: true,
+      message: "Sale completed!",
       transaction: transactionRes.rows[0],
       items: validatedItems.map(vi => ({
         product_id: vi.product_id,
