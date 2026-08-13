@@ -33,10 +33,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/products', productsRouter);
 app.use('/api/inventory', inventoryRouter);
 app.use('/api/pos', posRouter);
-app.use('/api/checkout', (req, res, next) => {
-  req.url = '/checkout';
-  next();
-}, posRouter);
+app.use('/api/checkout', posRouter);
 app.use('/api/analytics', analyticsRouter);
 
 // Initialize DB and Start Server

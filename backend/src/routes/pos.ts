@@ -11,7 +11,7 @@ interface CartItem {
 
 // POST /checkout - Checkout shopping cart items atomically
 // (Mounted as both POST /api/pos/checkout and POST /api/checkout)
-router.post('/checkout', async (req: Request, res: Response) => {
+const checkoutHandler = async (req: Request, res: Response) => {
   let items = req.body.items;
   const cartItems = req.body.cartItems;
   const paymentMethod = (req.body.paymentMethod || req.body.payment_method || 'CASH').toString().trim().toUpperCase();
@@ -165,7 +165,10 @@ router.post('/checkout', async (req: Request, res: Response) => {
   } finally {
     client.release();
   }
-});
+};
+
+router.post('/checkout', checkoutHandler);
+router.post('/', checkoutHandler);
 
 // GET /api/pos/transactions - Fetch history of transactions (useful helper)
 router.get('/transactions', async (req: Request, res: Response) => {
