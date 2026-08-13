@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode } from 'lucide-react';
+import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode, Camera } from 'lucide-react';
 import { Product } from '../App';
+import { Html5Qrcode } from 'html5-qrcode';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -34,9 +35,11 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'MOBILE'>('CASH');
   
-  // Audio-Visual Scanner states
+  // Camera & Scan states
   const [scanSuccess, setScanSuccess] = useState(false);
+  const [cameraModalOpen, setCameraModalOpen] = useState(false);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
   // UI states
   const [loading, setLoading] = useState(false);
@@ -154,6 +157,91 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     }
   };
 
+  // Webcam scanning start
+  const startCamera = async () => {
+    try {
+      await stopCamera();
+
+      const html5QrCode = new Html5Qrcode('webcam-scanner');
+      html5QrCodeRef.current = html5QrCode;
+
+      const qrCodeSuccessCallback = async (decodedText: string) => {
+        // Stop scanning immediately
+        await stopCamera();
+        setCameraModalOpen(false);
+
+        // Process search and add to cart
+        try {
+          playBeep();
+          setScanSuccess(true);
+          setTimeout(() => setScanSuccess(false), 300);
+
+          setLoading(true);
+          const response = await fetch(`${API_URL}/api/products/scan/${decodedText.trim()}`);
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || `Barcode '${decodedText}' not found in the catalog.`);
+          }
+
+          addToCart(data);
+        } catch (err: any) {
+          setErrorMsg(err.message || 'Scanned barcode not registered.');
+        } finally {
+          setLoading(false);
+          barcodeInputRef.current?.focus();
+        }
+      };
+
+      const config = { 
+        fps: 10, 
+        qrbox: (width: number, height: number) => {
+          const size = Math.min(width, height) * 0.70;
+          return { width: size, height: size };
+        }
+      };
+
+      await html5QrCode.start(
+        { facingMode: 'environment' },
+        config,
+        qrCodeSuccessCallback,
+        undefined
+      );
+    } catch (err) {
+      console.error('Failed to start camera scan:', err);
+      setErrorMsg('Could not access camera. Please check camera permissions.');
+      setCameraModalOpen(false);
+    }
+  };
+
+  const stopCamera = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
+      } catch (err) {
+        console.error('Failed to stop camera stream:', err);
+      }
+      html5QrCodeRef.current = null;
+    }
+  };
+
+  // Sync camera start/stop lifecycle with modal state
+  useEffect(() => {
+    if (cameraModalOpen) {
+      const timer = setTimeout(() => {
+        startCamera();
+      }, 150);
+      return () => {
+        clearTimeout(timer);
+        stopCamera();
+      };
+    } else {
+      stopCamera();
+    }
+  }, [cameraModalOpen]);
+
   const updateQuantity = (productId: number, delta: number) => {
     setErrorMsg(null);
     const index = cart.findIndex(item => item.product.id === productId);
@@ -270,8 +358,8 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Barcode Scanner Box */}
-            <form onSubmit={handleBarcodeScanSubmit} className="relative">
-              <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+            <form onSubmit={handleBarcodeScanSubmit} className="relative flex items-center">
+              <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400 pointer-events-none">
                 <QrCode className={`w-5 h-5 transition-colors ${scanSuccess ? 'text-emerald-400' : 'text-violet-400 animate-pulse'}`} />
               </span>
               <input
@@ -280,12 +368,20 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                 placeholder="Scan Barcode / SKU (Press Enter)..."
                 value={scanQuery}
                 onChange={(e) => setScanQuery(e.target.value)}
-                className={`w-full bg-[#151D30] border text-slate-100 pl-12 pr-4 py-3.5 rounded-2xl outline-none transition-all shadow-inner text-sm font-mono placeholder:text-slate-500 ${
+                className={`w-full bg-[#151D30] border text-slate-100 pl-12 pr-12 py-3.5 rounded-2xl outline-none transition-all shadow-inner text-sm font-mono placeholder:text-slate-500 ${
                   scanSuccess 
                     ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-950/20' 
                     : 'border-violet-500/40 focus:border-violet-500'
                 }`}
               />
+              <button
+                type="button"
+                onClick={() => setCameraModalOpen(true)}
+                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-violet-400 transition-colors"
+                title="Scan with webcam camera"
+              >
+                <Camera className="w-5 h-5" />
+              </button>
             </form>
 
             {/* Keyword Search Box */}
@@ -544,6 +640,40 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
             >
               Print & Dismiss
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Live Webcam Scanner Modal */}
+      {cameraModalOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-lg p-6 relative animate-scaleUp flex flex-col items-center">
+            
+            <div className="flex items-center justify-between w-full mb-4 border-b border-slate-800 pb-3">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Camera className="w-5 h-5 text-violet-400" />
+                Live Camera Barcode Scanner
+              </h3>
+              <button
+                onClick={() => setCameraModalOpen(false)}
+                className="text-xs text-slate-400 hover:text-slate-200 font-bold bg-slate-800/80 px-3 py-1 rounded-xl transition-all"
+              >
+                Cancel / Close
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 text-center mb-4">
+              Center the barcode or QR code inside the camera scanning viewport guide below.
+            </p>
+
+            {/* Scanning Viewport */}
+            <div className="w-full aspect-video rounded-2xl bg-[#0b0f19] border border-slate-700/80 overflow-hidden relative shadow-inner">
+              <div id="webcam-scanner" className="w-full h-full"></div>
+            </div>
+
+            <div className="text-[10px] text-slate-500 font-mono mt-4 text-center">
+              Scanning active • Support: EAN-13, EAN-8, UPC-A, Code 128, QR Codes
+            </div>
           </div>
         </div>
       )}
