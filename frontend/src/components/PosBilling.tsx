@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode } from 'lucide-react';
 import { Product } from '../App';
 
@@ -34,10 +34,30 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'MOBILE'>('CASH');
   
+  // Audio-Visual Scanner states
+  const [scanSuccess, setScanSuccess] = useState(false);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
   // UI states
   const [loading, setLoading] = useState(false);
   const [successInvoice, setSuccessInvoice] = useState<Invoice | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Focus scan box on mount and bind click refocus listener
+  useEffect(() => {
+    barcodeInputRef.current?.focus();
+
+    const handleGlobalClick = () => {
+      const activeEl = document.activeElement;
+      const searchInput = document.getElementById('search_query');
+      if (activeEl !== searchInput && activeEl !== barcodeInputRef.current) {
+        barcodeInputRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('click', handleGlobalClick);
+    return () => document.removeEventListener('click', handleGlobalClick);
+  }, []);
 
   // Filter products based on search query (Name and SKU only)
   const filteredProducts = products.filter(p => 
@@ -45,12 +65,34 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     p.sku.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Play synthesized beep using browser's AudioContext
+  const playBeep = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // High pitch beep (A5)
+      gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime); // Keep volume at 5%
+
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.1); // Beep for 100ms
+    } catch (e) {
+      console.warn('Web Audio Context not supported or blocked by browser settings:', e);
+    }
+  };
+
   const addToCart = (product: Product) => {
     setErrorMsg(null);
     setSuccessInvoice(null);
 
     if (product.current_stock <= 0) {
       setErrorMsg(`Product "${product.name}" is completely out of stock.`);
+      barcodeInputRef.current?.focus();
       return;
     }
 
@@ -60,6 +102,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
       const currentQty = cart[existingIndex].quantity_sold;
       if (currentQty >= product.current_stock) {
         setErrorMsg(`Cannot add more. Available stock for "${product.name}" is capped at ${product.current_stock} units.`);
+        barcodeInputRef.current?.focus();
         return;
       }
       const updatedCart = [...cart];
@@ -68,6 +111,9 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     } else {
       setCart([...cart, { product, quantity_sold: 1 }]);
     }
+
+    // Auto-focus after adding manually
+    barcodeInputRef.current?.focus();
   };
 
   const handleBarcodeScanSubmit = async (e: React.FormEvent) => {
@@ -87,14 +133,24 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
         throw new Error(data.error || `Barcode '${code}' not found in the catalog.`);
       }
 
+      // Play beep feedback
+      playBeep();
+
+      // Trigger green outline flash feedback
+      setScanSuccess(true);
+      setTimeout(() => setScanSuccess(false), 300);
+
       // Add scanned product to cart
       addToCart(data);
       setScanQuery(''); // Clear the input field for next scan
     } catch (err: any) {
       console.error('Scan lookup failed:', err);
       setErrorMsg(err.message || 'Scanned barcode not registered.');
+      setScanQuery(''); // Clear field so they can try again
     } finally {
       setLoading(false);
+      // Ensure cursor returns to scan input
+      barcodeInputRef.current?.focus();
     }
   };
 
@@ -119,10 +175,12 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     const updatedCart = [...cart];
     updatedCart[index].quantity_sold = newQty;
     setCart(updatedCart);
+    barcodeInputRef.current?.focus();
   };
 
   const removeFromCart = (productId: number) => {
     setCart(cart.filter(item => item.product.id !== productId));
+    barcodeInputRef.current?.focus();
   };
 
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.quantity_sold * parseFloat(item.product.price)), 0);
@@ -181,6 +239,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
       setErrorMsg(err.message || 'Server error occurred during checkout.');
     } finally {
       setLoading(false);
+      barcodeInputRef.current?.focus();
     }
   };
 
@@ -213,14 +272,19 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
             {/* Barcode Scanner Box */}
             <form onSubmit={handleBarcodeScanSubmit} className="relative">
               <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
-                <QrCode className="w-5 h-5 text-violet-400 animate-pulse" />
+                <QrCode className={`w-5 h-5 transition-colors ${scanSuccess ? 'text-emerald-400' : 'text-violet-400 animate-pulse'}`} />
               </span>
               <input
+                ref={barcodeInputRef}
                 type="text"
                 placeholder="Scan Barcode / SKU (Press Enter)..."
                 value={scanQuery}
                 onChange={(e) => setScanQuery(e.target.value)}
-                className="w-full bg-[#151D30] border border-violet-500/40 focus:border-violet-500 text-slate-100 pl-12 pr-4 py-3.5 rounded-2xl outline-none transition-colors shadow-inner text-sm font-mono placeholder:text-slate-500"
+                className={`w-full bg-[#151D30] border text-slate-100 pl-12 pr-4 py-3.5 rounded-2xl outline-none transition-all shadow-inner text-sm font-mono placeholder:text-slate-500 ${
+                  scanSuccess 
+                    ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-950/20' 
+                    : 'border-violet-500/40 focus:border-violet-500'
+                }`}
               />
             </form>
 
@@ -230,6 +294,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                 <Search className="w-5 h-5" />
               </span>
               <input
+                id="search_query"
                 type="text"
                 placeholder="Search products by SKU or name..."
                 value={searchQuery}
@@ -471,7 +536,10 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
             </div>
 
             <button
-              onClick={() => setSuccessInvoice(null)}
+              onClick={() => {
+                setSuccessInvoice(null);
+                barcodeInputRef.current?.focus();
+              }}
               className="w-full bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-bold py-2.5 rounded-xl transition-colors text-sm"
             >
               Print & Dismiss
