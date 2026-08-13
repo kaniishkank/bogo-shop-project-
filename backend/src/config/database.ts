@@ -10,14 +10,8 @@ export const pool = new Pool({
 });
 
 const migrationSql = `
-  -- Re-create database schema with updated fields
-  DROP TABLE IF EXISTS transaction_items CASCADE;
-  DROP TABLE IF EXISTS sales_transactions CASCADE;
-  DROP TABLE IF EXISTS incoming_loads CASCADE;
-  DROP TABLE IF EXISTS products CASCADE;
-
   -- Create products table
-  CREATE TABLE products (
+  CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
     sku VARCHAR(100) UNIQUE NOT NULL,
@@ -32,7 +26,7 @@ const migrationSql = `
   );
 
   -- Create incoming_loads table
-  CREATE TABLE incoming_loads (
+  CREATE TABLE IF NOT EXISTS incoming_loads (
     id SERIAL PRIMARY KEY,
     product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     quantity_added INT NOT NULL CHECK (quantity_added > 0),
@@ -41,7 +35,7 @@ const migrationSql = `
   );
 
   -- Create sales_transactions table
-  CREATE TABLE sales_transactions (
+  CREATE TABLE IF NOT EXISTS sales_transactions (
     id SERIAL PRIMARY KEY,
     total_amount DECIMAL(10, 2) NOT NULL,
     total_cogs DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
@@ -51,7 +45,7 @@ const migrationSql = `
   );
 
   -- Create transaction_items table
-  CREATE TABLE transaction_items (
+  CREATE TABLE IF NOT EXISTS transaction_items (
     id SERIAL PRIMARY KEY,
     transaction_id INT NOT NULL REFERENCES sales_transactions(id) ON DELETE CASCADE,
     product_id INT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
@@ -124,11 +118,25 @@ export async function initializeDatabase(retries = 5, delay = 2000): Promise<voi
       console.log(`Connecting to database (Attempt ${i + 1}/${retries})...`);
       const client = await pool.connect();
       try {
-        console.log('Running refactored migrations (dropping old tables & creating new)...');
-        await client.query(migrationSql);
-        console.log('Migrations complete. Seeding mock data...');
-        await client.query(seedSql);
-        console.log('Seeding complete.');
+        // Query to check if the public.products table already exists in public schema
+        const tableCheck = await client.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+              AND table_name = 'products'
+          );
+        `);
+        const tablesExist = tableCheck.rows[0].exists;
+
+        if (!tablesExist) {
+          console.log('Database tables not found. Running migrations (creating tables)...');
+          await client.query(migrationSql);
+          console.log('Seeding mock data...');
+          await client.query(seedSql);
+          console.log('Seeding complete.');
+        } else {
+          console.log('Database tables already exist. Skipping migrations and seed to ensure data persistence.');
+        }
         return;
       } finally {
         client.release();
