@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Truck, Search, PlusCircle, ArrowUpRight, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
+import { Truck, Search, PlusCircle, ArrowUpRight, CheckCircle2, AlertCircle, Camera, Pencil } from 'lucide-react';
 import { Product } from '../App';
 import CameraScannerModal from './CameraScannerModal';
 
@@ -17,6 +17,9 @@ interface LoadLog {
   product_sku: string;
   quantity_added: number;
   supplier_name: string;
+  price: number;
+  cost_price: number;
+  min_threshold: number;
   created_at: string;
 }
 
@@ -35,6 +38,17 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
 
   // Camera & Scan states
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
+
+  // Edit modal states
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [selectedLoad, setSelectedLoad] = useState<LoadLog | null>(null);
+  const [editBarcode, setEditBarcode] = useState('');
+  const [editProductName, setEditProductName] = useState('');
+  const [editQuantity, setEditQuantity] = useState('');
+  const [editSupplierName, setEditSupplierName] = useState('');
+  const [editUnitPrice, setEditUnitPrice] = useState('');
+  const [editCostPrice, setEditCostPrice] = useState('');
+  const [editMinThreshold, setEditMinThreshold] = useState('5');
 
   // Autocomplete UI state
   const [showDropdown, setShowDropdown] = useState(false);
@@ -60,6 +74,85 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
     }
     const text = await res.text();
     return { error: text || `HTTP Error ${res.status}: ${res.statusText}` };
+  };
+
+  const handleOpenEdit = (load: LoadLog) => {
+    setSelectedLoad(load);
+    setEditBarcode(load.product_sku);
+    setEditProductName(load.product_name);
+    setEditQuantity(load.quantity_added.toString());
+    setEditSupplierName(load.supplier_name);
+    setEditUnitPrice(load.price?.toString() || '0.00');
+    setEditCostPrice(load.cost_price?.toString() || '0.00');
+    setEditMinThreshold(load.min_threshold?.toString() || '5');
+    setEditModalOpen(true);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLoad) return;
+
+    const qty = parseInt(editQuantity);
+    const priceFloat = parseFloat(editUnitPrice);
+    const costPriceFloat = parseFloat(editCostPrice);
+    const thresholdInt = parseInt(editMinThreshold);
+
+    if (isNaN(qty) || qty <= 0) {
+      setErrorMsg('Quantity must be a positive integer.');
+      return;
+    }
+    if (isNaN(priceFloat) || priceFloat < 0) {
+      setErrorMsg('Price must be a valid positive number.');
+      return;
+    }
+    if (isNaN(costPriceFloat) || costPriceFloat < 0) {
+      setErrorMsg('Cost price must be a valid positive number.');
+      return;
+    }
+    if (isNaN(thresholdInt) || thresholdInt < 0) {
+      setErrorMsg('Min threshold must be a valid positive integer.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/inventory/loads/${selectedLoad.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          barcode: editBarcode.trim(),
+          name: editProductName.trim(),
+          quantity_added: qty,
+          supplier_name: editSupplierName.trim(),
+          price: priceFloat,
+          cost_price: costPriceFloat,
+          min_threshold: thresholdInt
+        })
+      });
+
+      const data = await safeParseJson(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update shipment entry');
+      }
+
+      setSuccessMsg('Shipment entry updated successfully!');
+      setTimeout(() => setSuccessMsg(null), 5000);
+      setEditModalOpen(false);
+      setSelectedLoad(null);
+
+      // Refresh list feeds
+      await fetchHistory();
+      await refreshData();
+    } catch (err: any) {
+      console.error('Error updating shipment entry:', err);
+      setErrorMsg(err.message || 'Server error occurred during shipment update.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchHistory = async () => {
@@ -527,12 +620,13 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
                   <th className="py-3 px-4 font-semibold text-center">Qty Added</th>
                   <th className="py-3 px-4 font-semibold">Supplier Name</th>
                   <th className="py-3 px-4 font-semibold">Arrival Time</th>
+                  <th className="py-3 px-4 font-semibold text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
                 {loads.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-8 text-center text-slate-500">
+                    <td colSpan={5} className="py-8 text-center text-slate-500">
                       No incoming shipment loads recorded yet.
                     </td>
                   </tr>
@@ -554,6 +648,15 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
                       <td className="py-3 px-4 text-slate-500 text-xs font-mono">
                         {new Date(l.created_at).toLocaleString()}
                       </td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          onClick={() => handleOpenEdit(l)}
+                          className="p-1.5 bg-slate-800/40 border border-slate-700/60 text-slate-300 hover:text-white hover:border-violet-500 rounded-lg transition-colors cursor-pointer"
+                          title="Edit Shipment Entry"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -570,6 +673,128 @@ export default function LoadIntake({ products, refreshData }: LoadIntakeProps) {
         onScanSuccess={handleCameraScanSuccess}
         onScanError={(msg) => setErrorMsg(msg)}
       />
+
+      {/* Edit Shipment Entry Modal */}
+      {editModalOpen && selectedLoad && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-xl p-6 relative overflow-hidden animate-scaleIn">
+            <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+              <Pencil className="w-6 h-6 text-violet-400" />
+              Edit Shipment / Catalog Entry
+            </h3>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Barcode */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Barcode / SKU</label>
+                  <input
+                    type="text"
+                    value={editBarcode}
+                    onChange={(e) => setEditBarcode(e.target.value)}
+                    required
+                    className="w-full bg-[#121824] border border-slate-700/50 rounded-xl px-4 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm"
+                  />
+                </div>
+
+                {/* Product Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Product Name</label>
+                  <input
+                    type="text"
+                    value={editProductName}
+                    onChange={(e) => setEditProductName(e.target.value)}
+                    required
+                    className="w-full bg-[#121824] border border-slate-700/50 rounded-xl px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm"
+                  />
+                </div>
+
+                {/* Quantity */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Quantity Added</label>
+                  <input
+                    type="number"
+                    value={editQuantity}
+                    onChange={(e) => setEditQuantity(e.target.value)}
+                    required
+                    className="w-full bg-[#121824] border border-slate-700/50 rounded-xl px-4 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm"
+                  />
+                </div>
+
+                {/* Supplier */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Supplier Name</label>
+                  <input
+                    type="text"
+                    value={editSupplierName}
+                    onChange={(e) => setEditSupplierName(e.target.value)}
+                    required
+                    className="w-full bg-[#121824] border border-slate-700/50 rounded-xl px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm"
+                  />
+                </div>
+
+                {/* Unit Price */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Selling Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editUnitPrice}
+                    onChange={(e) => setEditUnitPrice(e.target.value)}
+                    required
+                    className="w-full bg-[#121824] border border-slate-700/50 rounded-xl px-4 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm"
+                  />
+                </div>
+
+                {/* Unit Cost */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Unit Cost / COGS ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editCostPrice}
+                    onChange={(e) => setEditCostPrice(e.target.value)}
+                    required
+                    className="w-full bg-[#121824] border border-slate-700/50 rounded-xl px-4 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm"
+                  />
+                </div>
+
+                {/* Min Warning Threshold */}
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Min Warning Threshold</label>
+                  <input
+                    type="number"
+                    value={editMinThreshold}
+                    onChange={(e) => setEditMinThreshold(e.target.value)}
+                    required
+                    className="w-full bg-[#121824] border border-slate-700/50 rounded-xl px-4 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditModalOpen(false);
+                    setSelectedLoad(null);
+                  }}
+                  className="px-4 py-2 bg-slate-800/60 border border-slate-700/50 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-sm transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-5 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold rounded-xl text-sm transition-all shadow-md shadow-violet-500/10 active:scale-95 disabled:opacity-50"
+                >
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

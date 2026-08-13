@@ -127,6 +127,9 @@ router.get('/loads', async (req: Request, res: Response) => {
         p.sku as product_sku,
         l.quantity_added,
         l.supplier_name,
+        p.price::FLOAT as price,
+        p.cost_price::FLOAT as cost_price,
+        p.min_threshold as min_threshold,
         l.created_at
       FROM incoming_loads l
       JOIN products p ON l.product_id = p.id
@@ -138,6 +141,93 @@ router.get('/loads', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error fetching loads history:', err);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT /api/inventory/loads/:id - Update shipment and product entries
+router.put('/loads/:id', async (req: Request, res: Response) => {
+  const loadId = parseInt(req.params.id);
+  const { barcode, name, quantity_added, supplier_name, price, cost_price, min_threshold } = req.body;
+
+  if (isNaN(loadId)) {
+    return res.status(400).json({ error: 'Invalid load ID' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch current load record
+    const loadQuery = await client.query('SELECT * FROM incoming_loads WHERE id = $1 FOR UPDATE', [loadId]);
+    if (loadQuery.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Shipment load record not found' });
+    }
+    const oldLoad = loadQuery.rows[0];
+    const oldQty = oldLoad.quantity_added;
+    const productId = oldLoad.product_id;
+
+    // 2. Fetch current product record
+    const productQuery = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
+    if (productQuery.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Corresponding product not found' });
+    }
+    const product = productQuery.rows[0];
+
+    // 3. Calculate stock difference
+    const qtyDiff = parseInt(quantity_added) - oldQty;
+    const newStock = product.current_stock + qtyDiff;
+
+    if (newStock < 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot reduce quantity added: resulting stock level would fall below 0.' });
+    }
+
+    // 4. Update products fields
+    const updateProductQuery = `
+      UPDATE products
+      SET 
+        sku = COALESCE($1, sku),
+        name = COALESCE($2, name),
+        price = COALESCE($3, price),
+        cost_price = COALESCE($4, cost_price),
+        min_threshold = COALESCE($5, min_threshold),
+        current_stock = $6,
+        supplier_name = COALESCE($7, supplier_name),
+        updated_at = NOW()
+      WHERE id = $8
+    `;
+    await client.query(updateProductQuery, [
+      barcode ? barcode.trim() : null,
+      name ? name.trim() : null,
+      price !== undefined ? parseFloat(price) : null,
+      cost_price !== undefined ? parseFloat(cost_price) : null,
+      min_threshold !== undefined ? parseInt(min_threshold) : null,
+      newStock,
+      supplier_name ? supplier_name.trim() : null,
+      productId
+    ]);
+
+    // 5. Update incoming_loads record
+    const updateLoadQuery = `
+      UPDATE incoming_loads
+      SET 
+        quantity_added = $1,
+        supplier_name = $2
+      WHERE id = $3
+    `;
+    await client.query(updateLoadQuery, [parseInt(quantity_added), supplier_name ? supplier_name.trim() : oldLoad.supplier_name, loadId]);
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: 'Shipment entry updated successfully!' });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('Error updating load shipment entry:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    client.release();
   }
 });
 
