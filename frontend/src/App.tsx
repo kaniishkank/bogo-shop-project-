@@ -4,7 +4,7 @@ import LoadIntake from './components/LoadIntake';
 import PosBilling from './components/PosBilling';
 import Catalog from './components/Catalog';
 import Analytics from './components/Analytics';
-import { Package, TrendingUp, Truck, ShoppingCart, ClipboardList, AlertCircle, BarChart3 } from 'lucide-react';
+import { Package, TrendingUp, Truck, ShoppingCart, ClipboardList, AlertCircle, BarChart3, User, Lock, LogOut } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -46,7 +46,32 @@ export interface DashboardStats {
 }
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
+    sessionStorage.getItem('isAuthenticated') === 'true'
+  );
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   const [currentView, setCurrentView] = useState<View>('dashboard');
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (username.trim() === 'sarawanas' && password === '123') {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('isAuthenticated', 'true');
+      setLoginError(null);
+    } else {
+      setLoginError('Invalid username or password. Please try again.');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    sessionStorage.removeItem('isAuthenticated');
+    setUsername('');
+    setPassword('');
+  };
   
   // Lifted Global States
   const [products, setProducts] = useState<Product[]>([]);
@@ -152,6 +177,76 @@ export default function App() {
     }
   };
 
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#0B0F19] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.18),rgba(255,255,255,0))] flex items-center justify-center p-4">
+        <div className="w-full max-w-md glass-panel glow-card-violet rounded-2xl p-8 relative animate-scaleUp">
+          <div className="flex flex-col items-center text-center space-y-3 mb-8">
+            <div className="p-3 bg-gradient-to-tr from-violet-600 to-indigo-500 rounded-2xl shadow-lg">
+              <Package className="w-8 h-8 text-white" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-extrabold text-white bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent tracking-tight">
+                SARAWANAS
+              </h2>
+              <p className="text-xs text-slate-400 font-semibold tracking-wider uppercase mt-1">Store Management Terminal</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            {loginError && (
+              <div className="p-3.5 bg-red-950/25 border border-red-500/50 rounded-xl text-red-200 text-xs flex items-center gap-2.5">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Username</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                  <User className="w-4 h-4" />
+                </span>
+                <input
+                  type="text"
+                  required
+                  placeholder="Enter username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full bg-[#151D30] border border-slate-800/80 focus:border-violet-500 text-slate-100 pl-10 pr-4 py-3 rounded-xl outline-none transition-colors text-sm shadow-inner placeholder:text-slate-600 font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Password</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                  <Lock className="w-4 h-4" />
+                </span>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-[#151D30] border border-slate-800/80 focus:border-violet-500 text-slate-100 pl-10 pr-4 py-3 rounded-xl outline-none transition-colors text-sm shadow-inner placeholder:text-slate-600 font-medium"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:shadow-violet-600/25 flex items-center justify-center gap-2 text-sm mt-2 hover:scale-[1.01] active:scale-[0.99]"
+            >
+              Sign In to Terminal
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B0F19] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.18),rgba(255,255,255,0))] pb-16">
       
@@ -169,8 +264,9 @@ export default function App() {
             </span>
           </div>
 
-          {/* Navigation Links */}
-          <nav className="flex items-center gap-1.5 md:gap-3 bg-[#151D30]/65 border border-[#23304D]/50 p-1.5 rounded-xl">
+          <div className="flex items-center gap-3">
+            {/* Navigation Links */}
+            <nav className="flex items-center gap-1.5 md:gap-3 bg-[#151D30]/65 border border-[#23304D]/50 p-1.5 rounded-xl">
             
             {/* Dashboard Button */}
             <button
@@ -237,7 +333,17 @@ export default function App() {
               Financials
             </button>
 
-          </nav>
+            </nav>
+
+            {/* Logout Button */}
+            <button
+              onClick={handleLogout}
+              className="flex items-center justify-center p-2 border border-slate-800 text-slate-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 rounded-xl transition-all shrink-0"
+              title="Lock Terminal / Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 
