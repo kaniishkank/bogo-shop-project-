@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode, Camera, Printer, Download } from 'lucide-react';
+import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode, Camera, Printer, Download, X, Package } from 'lucide-react';
 import { Product } from '../App';
 import CameraScannerModal from './CameraScannerModal';
 import { jsPDF } from 'jspdf';
@@ -77,6 +77,11 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     doc.html(element, {
       callback: function (pdf) {
         pdf.save(`Receipt-INV-TX-100${invoice.id}.pdf`);
+      },
+      html2canvas: {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true
       },
       x: 0,
       y: 0,
@@ -557,7 +562,10 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
         const gst = grandTotal - subtotal;
 
         return (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div 
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
+            onClick={() => setSuccessInvoice(null)}
+          >
             {/* Dynamic Print Styles for thermal 80mm printing */}
             <style>{`
               @media print {
@@ -589,14 +597,17 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
               }
             `}</style>
             
-            <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-md p-6 relative flex flex-col justify-between max-h-[85vh] overflow-hidden my-auto animate-scaleUp">
+            <div 
+              className="glass-panel glow-card-violet rounded-2xl w-full max-w-md p-6 relative flex flex-col justify-between max-h-[85vh] overflow-hidden my-auto animate-scaleUp"
+              onClick={(e) => e.stopPropagation()}
+            >
               
               <div className="flex items-center justify-between border-b border-slate-700/60 pb-4 mb-2 shrink-0">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Receipt className="w-4 h-4 text-violet-400" />
                   Grocery Receipt Issued
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => downloadReceiptPdf(successInvoice)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all"
@@ -611,14 +622,29 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                     <Printer className="w-3.5 h-3.5" />
                     Print Receipt
                   </button>
+                  <button
+                    onClick={() => setSuccessInvoice(null)}
+                    className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all ml-1"
+                    title="Close"
+                  >
+                    <X className="w-4.5 h-4.5" />
+                  </button>
                 </div>
               </div>
 
               {/* Thermal Paper Receipt Layout Preview Container */}
               <div 
                 id="receipt-print-area"
+                style={{ backgroundColor: '#ffffff', color: '#000000' }}
                 className="bg-white text-black p-6 rounded-xl font-mono text-[11px] leading-relaxed w-full max-w-sm mx-auto shadow-inner border border-slate-200 overflow-y-auto flex-1 my-3 scrollbar-thin"
               >
+                {/* Store Logo Placeholder */}
+                <div className="flex justify-center mb-3">
+                  <div className="p-2 bg-black text-white rounded-xl flex items-center justify-center shadow-md">
+                    <Package className="w-6 h-6 text-white" />
+                  </div>
+                </div>
+
                 {/* Header */}
                 <div className="text-center space-y-0.5 mb-4">
                   <h4 className="font-bold text-sm tracking-tight text-black">SARAWANAS SUPERMARKET</h4>
@@ -648,15 +674,18 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
                 {/* Table Items */}
                 <div className="space-y-2 mb-4 text-[10px] text-slate-800">
-                  {successInvoice.items.map((item, idx) => (
-                    <div key={idx}>
-                      <div className="font-semibold text-black truncate max-w-[280px]">{item.name}</div>
-                      <div className="flex justify-between text-slate-600 text-[9px] mt-0.5">
-                        <span>{item.quantity_sold} x ${parseFloat(item.unit_price.toString()).toFixed(2)}</span>
-                        <span className="font-mono text-black font-semibold">${(item.quantity_sold * parseFloat(item.unit_price.toString())).toFixed(2)}</span>
+                  {successInvoice.items.map((item, idx) => {
+                    const productSku = products.find(p => p.id === item.product_id)?.sku || 'N/A';
+                    return (
+                      <div key={idx} className="border-b border-dashed border-slate-100 pb-1.5 last:border-0 last:pb-0">
+                        <div className="font-semibold text-black truncate max-w-[280px]">{item.name}</div>
+                        <div className="flex justify-between text-slate-600 text-[9px] mt-0.5">
+                          <span>SKU: {productSku} | Qty: {item.quantity_sold} x ${parseFloat(item.unit_price.toString()).toFixed(2)}</span>
+                          <span className="font-mono text-black font-semibold">${(item.quantity_sold * parseFloat(item.unit_price.toString())).toFixed(2)}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <p className="text-slate-400 text-[9px] pt-1">----------------------------------------</p>
                 </div>
 
