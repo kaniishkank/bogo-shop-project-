@@ -55,8 +55,12 @@ const migrationSql = `
 `;
 
 const seedSql = `
-  -- Seed SQL (Empty for clean slate demo)
-  SELECT 1;
+  -- Insert exactly 2 products qualifying as dead stock (unsold for >90 days)
+  INSERT INTO products (name, sku, price, cost_price, current_stock, min_threshold, supplier_name, last_sold_at, created_at)
+  VALUES 
+    ('Vintage Copper Tea Set', 'SKU-TEAS-1029', 75.00, 40.00, 12, 5, 'Legacy Imports', NOW() - INTERVAL '95 days', NOW() - INTERVAL '120 days'),
+    ('Heavy Duty Cargo Straps', 'SKU-STRA-4829', 19.99, 10.00, 8, 3, 'Titan Logistics Supply', NOW() - INTERVAL '92 days', NOW() - INTERVAL '130 days')
+  ON CONFLICT (sku) DO NOTHING;
 `;
 
 export async function initializeDatabase(retries = 5, delay = 2000): Promise<void> {
