@@ -62,74 +62,27 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   };
 
   const downloadReceiptPdf = (invoice: Invoice) => {
+    const element = document.getElementById('receipt-print-area');
+    if (!element) return;
+
+    // Estimate document height based on items list
+    const calculatedHeight = 135 + invoice.items.length * 10;
+
     const doc = new jsPDF({
       unit: 'mm',
-      format: [80, 130 + invoice.items.length * 8]
+      format: [80, calculatedHeight],
+      orientation: 'portrait'
     });
 
-    doc.setFont('courier', 'normal');
-    doc.setFontSize(10);
-    doc.text('SARAWANAS SUPERMARKET', 40, 10, { align: 'center' });
-    doc.setFontSize(7);
-    doc.text('123, Main Bazaar, Kovilpatti', 40, 14, { align: 'center' });
-    doc.text('GSTIN: 33AACCS2026A1Z3', 40, 18, { align: 'center' });
-    doc.text('Phone: +91 98765 43210', 40, 22, { align: 'center' });
-    doc.text('------------------------------------------', 40, 26, { align: 'center' });
-
-    doc.text(`INV #: TX-100${invoice.id}`, 6, 31);
-    doc.text(`Date : ${new Date(invoice.created_at).toLocaleString()}`, 6, 35);
-    doc.text('Cashier: sarawanas', 6, 39);
-    doc.text(`Payment: ${invoice.payment_method}`, 6, 43);
-    doc.text('------------------------------------------', 40, 48, { align: 'center' });
-
-    doc.text('Item (Qty @ Price)', 6, 53);
-    doc.text('Total', 74, 53, { align: 'right' });
-    doc.text('------------------------------------------', 40, 57, { align: 'center' });
-
-    let y = 62;
-    invoice.items.forEach((item) => {
-      const name = item.name.length > 20 ? item.name.substring(0, 18) + '..' : item.name;
-      doc.text(name, 6, y);
-      const qtyPrice = `${item.quantity_sold} x $${parseFloat(item.unit_price.toString()).toFixed(2)}`;
-      doc.text(qtyPrice, 6, y + 4);
-      
-      const totalItem = `$${(item.quantity_sold * parseFloat(item.unit_price.toString())).toFixed(2)}`;
-      doc.text(totalItem, 74, y + 4, { align: 'right' });
-      y += 9;
+    doc.html(element, {
+      callback: function (pdf) {
+        pdf.save(`Receipt-INV-TX-100${invoice.id}.pdf`);
+      },
+      x: 0,
+      y: 0,
+      width: 80,
+      windowWidth: 340 // Fits text layout correctly into the 80mm page width
     });
-
-    doc.text('------------------------------------------', 40, y, { align: 'center' });
-    y += 5;
-
-    const grandTotal = parseFloat(invoice.total_amount);
-    const subtotal = grandTotal / 1.05;
-    const gst = grandTotal - subtotal;
-
-    doc.text('Subtotal:', 6, y);
-    doc.text(`$${subtotal.toFixed(2)}`, 74, y, { align: 'right' });
-    y += 4;
-
-    doc.text('GST (5% Incl.):', 6, y);
-    doc.text(`$${gst.toFixed(2)}`, 74, y, { align: 'right' });
-    y += 4;
-
-    doc.setFont('courier', 'bold');
-    doc.text('GRAND TOTAL:', 6, y);
-    doc.text(`$${grandTotal.toFixed(2)}`, 74, y, { align: 'right' });
-    doc.setFont('courier', 'normal');
-    y += 6;
-
-    doc.text('------------------------------------------', 40, y, { align: 'center' });
-    y += 5;
-
-    doc.text('Thank you for shopping with us!', 40, y, { align: 'center' });
-    y += 4;
-    doc.text('Visit again!', 40, y, { align: 'center' });
-    y += 6;
-
-    doc.text('|||||| |||| ||| ||||||| |||', 40, y, { align: 'center' });
-
-    doc.save(`Receipt-INV-TX-100${invoice.id}.pdf`);
   };
 
   // Focus scan box on mount and bind click refocus listener
@@ -613,28 +566,32 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                   background: none !important;
                   box-shadow: none !important;
                 }
-                #thermal-receipt-print, #thermal-receipt-print * {
+                #receipt-print-area, #receipt-print-area * {
                   visibility: visible;
                 }
-                #thermal-receipt-print {
+                #receipt-print-area {
                   position: absolute;
                   left: 0;
                   top: 0;
-                  width: 80mm;
-                  padding: 4mm !important;
+                  width: 80mm !important;
                   margin: 0 !important;
+                  padding: 4mm !important;
                   background: white !important;
                   color: black !important;
                   font-family: 'Courier New', Courier, monospace !important;
                   border: none !important;
                   box-shadow: none !important;
                 }
+                @page {
+                  size: 80mm auto;
+                  margin: 0;
+                }
               }
             `}</style>
             
-            <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-lg p-6 relative my-8 animate-scaleUp">
+            <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-md p-6 relative flex flex-col justify-between max-h-[85vh] overflow-hidden my-auto animate-scaleUp">
               
-              <div className="flex items-center justify-between border-b border-slate-700/60 pb-4 mb-4">
+              <div className="flex items-center justify-between border-b border-slate-700/60 pb-4 mb-2 shrink-0">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Receipt className="w-4 h-4 text-violet-400" />
                   Grocery Receipt Issued
@@ -642,14 +599,14 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                 <div className="flex gap-2">
                   <button
                     onClick={() => downloadReceiptPdf(successInvoice)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Download PDF
                   </button>
                   <button
                     onClick={() => window.print()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-violet-900/20"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-violet-900/20"
                   >
                     <Printer className="w-3.5 h-3.5" />
                     Print Receipt
@@ -659,8 +616,8 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
 
               {/* Thermal Paper Receipt Layout Preview Container */}
               <div 
-                id="thermal-receipt-print"
-                className="bg-white text-black p-6 rounded-xl font-mono text-[11px] leading-relaxed w-full max-w-sm mx-auto shadow-inner border border-slate-200"
+                id="receipt-print-area"
+                className="bg-white text-black p-6 rounded-xl font-mono text-[11px] leading-relaxed w-full max-w-sm mx-auto shadow-inner border border-slate-200 overflow-y-auto flex-1 my-3 scrollbar-thin"
               >
                 {/* Header */}
                 <div className="text-center space-y-0.5 mb-4">
@@ -738,7 +695,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                   setSuccessInvoice(null);
                   barcodeInputRef.current?.focus();
                 }}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:scale-[1.01] active:scale-[0.99] text-sm mt-6 flex items-center justify-center gap-2"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:scale-[1.01] active:scale-[0.99] text-sm mt-4 flex items-center justify-center gap-2 shrink-0"
               >
                 <CheckCircle2 className="w-5 h-5" />
                 Start New Sale
