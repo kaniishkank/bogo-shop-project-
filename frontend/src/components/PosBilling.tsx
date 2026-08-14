@@ -35,8 +35,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'MOBILE'>('CASH');
-  const [amountTendered, setAmountTendered] = useState<string>('');
-  const [lastAmountTendered, setLastAmountTendered] = useState<number>(0);
   
   // Camera & Scan states
   const [scanSuccess, setScanSuccess] = useState(false);
@@ -63,10 +61,10 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     return { error: text || `HTTP Error ${res.status}: ${res.statusText}` };
   };
 
-  const downloadReceiptPdf = (invoice: Invoice, tendered: number, change: number) => {
+  const downloadReceiptPdf = (invoice: Invoice) => {
     const doc = new jsPDF({
       unit: 'mm',
-      format: [80, 140 + invoice.items.length * 8]
+      format: [80, 130 + invoice.items.length * 8]
     });
 
     doc.setFont('courier', 'normal');
@@ -119,14 +117,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     doc.text('GRAND TOTAL:', 6, y);
     doc.text(`$${grandTotal.toFixed(2)}`, 74, y, { align: 'right' });
     doc.setFont('courier', 'normal');
-    y += 5;
-
-    doc.text('Amount Tendered:', 6, y);
-    doc.text(`$${tendered.toFixed(2)}`, 74, y, { align: 'right' });
-    y += 4;
-
-    doc.text('Change Returned:', 6, y);
-    doc.text(`$${change.toFixed(2)}`, 74, y, { align: 'right' });
     y += 6;
 
     doc.text('------------------------------------------', 40, y, { align: 'center' });
@@ -392,12 +382,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
       }
 
       // Success
-      const tenderedVal = paymentMethod === 'CASH' 
-        ? (parseFloat(amountTendered) || parseFloat(data.transaction.total_amount)) 
-        : parseFloat(data.transaction.total_amount);
-      setLastAmountTendered(tenderedVal);
-      setAmountTendered('');
-
       setSuccessInvoice({
         id: data.transaction.id,
         total_amount: data.transaction.total_amount,
@@ -577,20 +561,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
               </div>
             )}
 
-            {paymentMethod === 'CASH' && cart.length > 0 && (
-              <div className="space-y-1.5 animate-fadeIn">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Cash Amount Tendered ($)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min={cartTotal}
-                  placeholder={`Min: $${cartTotal.toFixed(2)}`}
-                  value={amountTendered}
-                  onChange={(e) => setAmountTendered(e.target.value)}
-                  className="w-full bg-[#0B0F19] border border-slate-800 focus:border-violet-500 text-slate-100 px-3.5 py-2.5 rounded-xl outline-none text-sm font-mono placeholder:text-slate-700"
-                />
-              </div>
-            )}
 
             <div className="space-y-1.5 text-xs text-slate-400 font-mono">
               <div className="flex justify-between">
@@ -632,7 +602,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
         const grandTotal = parseFloat(successInvoice.total_amount);
         const subtotal = grandTotal / 1.05;
         const gst = grandTotal - subtotal;
-        const changeReturned = Math.max(0, lastAmountTendered - grandTotal);
 
         return (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -672,7 +641,7 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                 </h3>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => downloadReceiptPdf(successInvoice, lastAmountTendered, changeReturned)}
+                    onClick={() => downloadReceiptPdf(successInvoice)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -748,15 +717,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
                     <span>GRAND TOTAL</span>
                     <span>${grandTotal.toFixed(2)}</span>
                   </div>
-                  <p className="text-slate-400 text-[9px] pt-1">----------------------------------------</p>
-                  <div className="flex justify-between font-semibold mt-1">
-                    <span>Amount Tendered</span>
-                    <span>${lastAmountTendered.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between font-bold text-emerald-700 text-xs">
-                    <span>Change Returned</span>
-                    <span>${changeReturned.toFixed(2)}</span>
-                  </div>
                 </div>
 
                 {/* Footer Notes */}
@@ -776,7 +736,6 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
               <button
                 onClick={() => {
                   setSuccessInvoice(null);
-                  setLastAmountTendered(0);
                   barcodeInputRef.current?.focus();
                 }}
                 className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:scale-[1.01] active:scale-[0.99] text-sm mt-6 flex items-center justify-center gap-2"
