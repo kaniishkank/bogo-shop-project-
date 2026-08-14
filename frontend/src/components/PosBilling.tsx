@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode, Camera } from 'lucide-react';
+import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, AlertCircle, Receipt, QrCode, Camera, Printer, Download } from 'lucide-react';
 import { Product } from '../App';
 import CameraScannerModal from './CameraScannerModal';
+import { jsPDF } from 'jspdf';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -34,6 +35,8 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'MOBILE'>('CASH');
+  const [amountTendered, setAmountTendered] = useState<string>('');
+  const [lastAmountTendered, setLastAmountTendered] = useState<number>(0);
   
   // Camera & Scan states
   const [scanSuccess, setScanSuccess] = useState(false);
@@ -58,6 +61,85 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
     }
     const text = await res.text();
     return { error: text || `HTTP Error ${res.status}: ${res.statusText}` };
+  };
+
+  const downloadReceiptPdf = (invoice: Invoice, tendered: number, change: number) => {
+    const doc = new jsPDF({
+      unit: 'mm',
+      format: [80, 140 + invoice.items.length * 8]
+    });
+
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(10);
+    doc.text('SARAWANAS SUPERMARKET', 40, 10, { align: 'center' });
+    doc.setFontSize(7);
+    doc.text('123, Main Bazaar, Kovilpatti', 40, 14, { align: 'center' });
+    doc.text('GSTIN: 33AACCS2026A1Z3', 40, 18, { align: 'center' });
+    doc.text('Phone: +91 98765 43210', 40, 22, { align: 'center' });
+    doc.text('------------------------------------------', 40, 26, { align: 'center' });
+
+    doc.text(`INV #: TX-100${invoice.id}`, 6, 31);
+    doc.text(`Date : ${new Date(invoice.created_at).toLocaleString()}`, 6, 35);
+    doc.text('Cashier: sarawanas', 6, 39);
+    doc.text(`Payment: ${invoice.payment_method}`, 6, 43);
+    doc.text('------------------------------------------', 40, 48, { align: 'center' });
+
+    doc.text('Item (Qty @ Price)', 6, 53);
+    doc.text('Total', 74, 53, { align: 'right' });
+    doc.text('------------------------------------------', 40, 57, { align: 'center' });
+
+    let y = 62;
+    invoice.items.forEach((item) => {
+      const name = item.name.length > 20 ? item.name.substring(0, 18) + '..' : item.name;
+      doc.text(name, 6, y);
+      const qtyPrice = `${item.quantity_sold} x $${parseFloat(item.unit_price.toString()).toFixed(2)}`;
+      doc.text(qtyPrice, 6, y + 4);
+      
+      const totalItem = `$${(item.quantity_sold * parseFloat(item.unit_price.toString())).toFixed(2)}`;
+      doc.text(totalItem, 74, y + 4, { align: 'right' });
+      y += 9;
+    });
+
+    doc.text('------------------------------------------', 40, y, { align: 'center' });
+    y += 5;
+
+    const grandTotal = parseFloat(invoice.total_amount);
+    const subtotal = grandTotal / 1.05;
+    const gst = grandTotal - subtotal;
+
+    doc.text('Subtotal:', 6, y);
+    doc.text(`$${subtotal.toFixed(2)}`, 74, y, { align: 'right' });
+    y += 4;
+
+    doc.text('GST (5% Incl.):', 6, y);
+    doc.text(`$${gst.toFixed(2)}`, 74, y, { align: 'right' });
+    y += 4;
+
+    doc.setFont('courier', 'bold');
+    doc.text('GRAND TOTAL:', 6, y);
+    doc.text(`$${grandTotal.toFixed(2)}`, 74, y, { align: 'right' });
+    doc.setFont('courier', 'normal');
+    y += 5;
+
+    doc.text('Amount Tendered:', 6, y);
+    doc.text(`$${tendered.toFixed(2)}`, 74, y, { align: 'right' });
+    y += 4;
+
+    doc.text('Change Returned:', 6, y);
+    doc.text(`$${change.toFixed(2)}`, 74, y, { align: 'right' });
+    y += 6;
+
+    doc.text('------------------------------------------', 40, y, { align: 'center' });
+    y += 5;
+
+    doc.text('Thank you for shopping with us!', 40, y, { align: 'center' });
+    y += 4;
+    doc.text('Visit again!', 40, y, { align: 'center' });
+    y += 6;
+
+    doc.text('|||||| |||| ||| ||||||| |||', 40, y, { align: 'center' });
+
+    doc.save(`Receipt-INV-TX-100${invoice.id}.pdf`);
   };
 
   // Focus scan box on mount and bind click refocus listener
@@ -310,6 +392,12 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
       }
 
       // Success
+      const tenderedVal = paymentMethod === 'CASH' 
+        ? (parseFloat(amountTendered) || parseFloat(data.transaction.total_amount)) 
+        : parseFloat(data.transaction.total_amount);
+      setLastAmountTendered(tenderedVal);
+      setAmountTendered('');
+
       setSuccessInvoice({
         id: data.transaction.id,
         total_amount: data.transaction.total_amount,
@@ -489,6 +577,21 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
               </div>
             )}
 
+            {paymentMethod === 'CASH' && cart.length > 0 && (
+              <div className="space-y-1.5 animate-fadeIn">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Cash Amount Tendered ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={cartTotal}
+                  placeholder={`Min: $${cartTotal.toFixed(2)}`}
+                  value={amountTendered}
+                  onChange={(e) => setAmountTendered(e.target.value)}
+                  className="w-full bg-[#0B0F19] border border-slate-800 focus:border-violet-500 text-slate-100 px-3.5 py-2.5 rounded-xl outline-none text-sm font-mono placeholder:text-slate-700"
+                />
+              </div>
+            )}
+
             <div className="space-y-1.5 text-xs text-slate-400 font-mono">
               <div className="flex justify-between">
                 <span>Subtotal</span>
@@ -525,57 +628,167 @@ export default function PosBilling({ products, refreshData }: PosBillingProps) {
       </div>
 
       {/* Invoice Receipt Modal Success Notification */}
-      {successInvoice && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-md p-6 relative animate-scaleUp">
+      {successInvoice && (() => {
+        const grandTotal = parseFloat(successInvoice.total_amount);
+        const subtotal = grandTotal / 1.05;
+        const gst = grandTotal - subtotal;
+        const changeReturned = Math.max(0, lastAmountTendered - grandTotal);
+
+        return (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+            {/* Dynamic Print Styles for thermal 80mm printing */}
+            <style>{`
+              @media print {
+                body * {
+                  visibility: hidden;
+                  background: none !important;
+                  box-shadow: none !important;
+                }
+                #thermal-receipt-print, #thermal-receipt-print * {
+                  visibility: visible;
+                }
+                #thermal-receipt-print {
+                  position: absolute;
+                  left: 0;
+                  top: 0;
+                  width: 80mm;
+                  padding: 4mm !important;
+                  margin: 0 !important;
+                  background: white !important;
+                  color: black !important;
+                  font-family: 'Courier New', Courier, monospace !important;
+                  border: none !important;
+                  box-shadow: none !important;
+                }
+              }
+            `}</style>
             
-            <div className="flex flex-col items-center text-center space-y-3 mb-6">
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400">
-                <Receipt className="w-8 h-8" />
+            <div className="glass-panel glow-card-violet rounded-2xl w-full max-w-lg p-6 relative my-8 animate-scaleUp">
+              
+              <div className="flex items-center justify-between border-b border-slate-700/60 pb-4 mb-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-violet-400" />
+                  Grocery Receipt Issued
+                </h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => downloadReceiptPdf(successInvoice, lastAmountTendered, changeReturned)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download PDF
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-violet-900/20"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Print Receipt
+                  </button>
+                </div>
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-white">Invoice Receipt Issued</h3>
-                <p className="text-xs text-emerald-400 font-semibold font-mono mt-0.5">Transaction #TX-100{successInvoice.id} COMPLETED</p>
-                <p className="text-[10px] text-slate-500 mt-1">{new Date(successInvoice.created_at).toLocaleString()}</p>
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-violet-500/10 border border-violet-500/25 text-violet-400 rounded-md inline-block mt-2">
-                  Paid via {successInvoice.payment_method}
-                </span>
-              </div>
-            </div>
 
-            <div className="border-t border-b border-slate-700/60 py-4 my-4 max-h-[220px] overflow-y-auto pr-1">
-              <div className="space-y-3">
-                {successInvoice.items.map((item, idx) => (
-                  <div key={idx} className="flex justify-between text-xs">
-                    <div>
-                      <span className="font-semibold text-white">{item.name}</span>
-                      <span className="text-[10px] text-slate-500 block">Qty: {item.quantity_sold} @ ${parseFloat(item.unit_price.toString()).toFixed(2)}</span>
-                    </div>
-                    <span className="font-mono text-slate-300 font-semibold">
-                      ${(item.quantity_sold * parseFloat(item.unit_price.toString())).toFixed(2)}
-                    </span>
+              {/* Thermal Paper Receipt Layout Preview Container */}
+              <div 
+                id="thermal-receipt-print"
+                className="bg-white text-black p-6 rounded-xl font-mono text-[11px] leading-relaxed w-full max-w-sm mx-auto shadow-inner border border-slate-200"
+              >
+                {/* Header */}
+                <div className="text-center space-y-0.5 mb-4">
+                  <h4 className="font-bold text-sm tracking-tight text-black">SARAWANAS SUPERMARKET</h4>
+                  <p className="text-[9px] text-slate-600">123, Main Bazaar, Kovilpatti</p>
+                  <p className="text-[9px] text-slate-600">GSTIN: 33AACCS2026A1Z3</p>
+                  <p className="text-[9px] text-slate-600">Phone: +91 98765 43210</p>
+                  <p className="text-slate-400 text-[9px] mt-2">----------------------------------------</p>
+                </div>
+
+                {/* Metadata */}
+                <div className="space-y-1 mb-3 text-slate-700 text-[10px]">
+                  <div className="flex justify-between">
+                    <span>INV #: TX-100{successInvoice.id}</span>
+                    <span>Date: {new Date(successInvoice.created_at).toLocaleDateString()}</span>
                   </div>
-                ))}
+                  <div>Time: {new Date(successInvoice.created_at).toLocaleTimeString()}</div>
+                  <div>Cashier: sarawanas</div>
+                  <div>Payment Method: {successInvoice.payment_method}</div>
+                  <p className="text-slate-400 text-[9px] mt-1">----------------------------------------</p>
+                </div>
+
+                {/* Table Header */}
+                <div className="flex justify-between font-bold text-black border-b border-slate-300 pb-1 mb-2 text-[10px]">
+                  <span>Item description</span>
+                  <span>Total</span>
+                </div>
+
+                {/* Table Items */}
+                <div className="space-y-2 mb-4 text-[10px] text-slate-800">
+                  {successInvoice.items.map((item, idx) => (
+                    <div key={idx}>
+                      <div className="font-semibold text-black truncate max-w-[280px]">{item.name}</div>
+                      <div className="flex justify-between text-slate-600 text-[9px] mt-0.5">
+                        <span>{item.quantity_sold} x ${parseFloat(item.unit_price.toString()).toFixed(2)}</span>
+                        <span className="font-mono text-black font-semibold">${(item.quantity_sold * parseFloat(item.unit_price.toString())).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-slate-400 text-[9px] pt-1">----------------------------------------</p>
+                </div>
+
+                {/* Totals Section */}
+                <div className="space-y-1 text-slate-700 text-[10px]">
+                  <div className="flex justify-between">
+                    <span>Subtotal</span>
+                    <span>${subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>GST (5% Incl.)</span>
+                    <span>${gst.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-black font-extrabold border-t border-slate-300 pt-1.5 text-xs">
+                    <span>GRAND TOTAL</span>
+                    <span>${grandTotal.toFixed(2)}</span>
+                  </div>
+                  <p className="text-slate-400 text-[9px] pt-1">----------------------------------------</p>
+                  <div className="flex justify-between font-semibold mt-1">
+                    <span>Amount Tendered</span>
+                    <span>${lastAmountTendered.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-emerald-700 text-xs">
+                    <span>Change Returned</span>
+                    <span>${changeReturned.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {/* Footer Notes */}
+                <div className="text-center space-y-1 mt-6 text-slate-500 text-[9px]">
+                  <p className="text-slate-400 text-[9px]">----------------------------------------</p>
+                  <p className="font-medium text-slate-700 mt-2">Thank you for shopping with us!</p>
+                  <p className="font-medium text-slate-700">Visit again.</p>
+                  {/* Mock Barcode */}
+                  <div className="text-[16px] text-black font-sans tracking-[3px] select-none mt-4 font-bold">
+                    ||||| |||| || | |||| ||
+                  </div>
+                  <span className="text-[8px] tracking-[1px] block mt-0.5 text-slate-400">TX-100{successInvoice.id}</span>
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-between font-mono text-sm font-extrabold text-white mb-6">
-              <span>Amount Paid</span>
-              <span className="text-emerald-400 text-lg">${parseFloat(successInvoice.total_amount).toFixed(2)}</span>
-            </div>
+              {/* Reset POS and start next sale action */}
+              <button
+                onClick={() => {
+                  setSuccessInvoice(null);
+                  setLastAmountTendered(0);
+                  barcodeInputRef.current?.focus();
+                }}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:scale-[1.01] active:scale-[0.99] text-sm mt-6 flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                Start New Sale
+              </button>
 
-            <button
-              onClick={() => {
-                setSuccessInvoice(null);
-                barcodeInputRef.current?.focus();
-              }}
-              className="w-full bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-bold py-2.5 rounded-xl transition-colors text-sm"
-            >
-              Print & Dismiss
-            </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Reusable Camera Scanner Modal */}
       <CameraScannerModal
